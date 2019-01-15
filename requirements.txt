@@ -3,7 +3,7 @@ numpy
 sentencepiece
 gensim
 tqdm
-pytorch_ignite
-ignite
+pytorch-ignite
 tensorboardX
 PyYAML
+rouge
