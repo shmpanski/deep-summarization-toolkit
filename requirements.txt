@@ -1,0 +1,9 @@
+torch>=0.4.0
+numpy
+sentencepiece
+gensim
+tqdm
+pytorch_ignite
+ignite
+tensorboardX
+PyYAML
