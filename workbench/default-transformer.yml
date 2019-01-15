@@ -45,4 +45,3 @@ targs:
   test_batch_size: 16
   checkpoint_interval: 1000
   train_log_interval: 100
-  train_sample_interval: 100

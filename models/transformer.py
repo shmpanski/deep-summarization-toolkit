@@ -138,6 +138,7 @@ class SummarizationTransformer(BaseSummarizationModel):
             optimizer.zero_grad()
             gen_probs, gen = self.forward(batch["src"], batch["trg"])
             loss = self.criterion(gen_probs.view(-1, self.vocab_size), batch["trg"].view(-1))
+            loss.backward()
             optimizer.step()
 
             return loss.item()
