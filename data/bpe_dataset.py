@@ -181,4 +181,4 @@ class BPEDataset(SummarizationDataset):
             logging.info("{} exported".format(exported_file_name))
         logging.info("Data preprocessing completed")
 
-        return tuple(BPEDataset(directory, prefix, part, max_sentence_length) for part in parts)
+        return tuple(BPEDataset(directory, prefix, part, max_sequence_length) for part in parts)
