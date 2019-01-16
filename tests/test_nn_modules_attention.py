@@ -29,3 +29,11 @@ class TestLuongAttentionMethods(unittest.TestCase):
                 context_vector, attention_distr = attention(enc_seq, enc_seq, dec_seq)
                 self.assertTupleEqual(context_vector.shape, (8, 7, 42))
                 self.assertTupleEqual(attention_distr.shape, (8, 7, 15))
+
+    def test_attention_batch_first(self):
+        enc_seq = torch.randn(15, 8, 42)
+        dec_seq = torch.randn(7, 8, 42)
+        attention = LuongAttention(batch_first=False)
+        context_vector, attention_distr = attention(enc_seq, enc_seq, dec_seq)
+        self.assertTupleEqual(context_vector.shape, (8, 7, 42))
+        self.assertTupleEqual(attention_distr.shape, (8, 7, 15))

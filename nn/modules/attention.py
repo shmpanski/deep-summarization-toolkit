@@ -145,11 +145,12 @@ class MultiHeadAttention(nn.Module):
 
 
 class LuongAttention(nn.Module):
-    def __init__(self, score="dot", **kwargs):
+    def __init__(self, score="dot", batch_first=True, **kwargs):
         """Luong Attention Model
 
         Args:
             score (str, optional): Defaults to "dot". One of :attr:`score` function. Available: ``dot`` and ``general``.
+            batch_first (bool, optional): Defaults to `True`. If False, swap axis and use ``0`` dimension as sequence.
             key_size (int, optional): Stores in **kwargs. Size of :attr:`key`.
             query_size (int, optional): Stores in **kwargs. Size of :attr:`query`.
 
@@ -171,6 +172,7 @@ class LuongAttention(nn.Module):
 
         super(LuongAttention, self).__init__()
         self._available_scores = ["dot", "general"]
+        self.batch_first = batch_first
         if score not in self._available_scores:
             raise ValueError("Invalid attention score `{}`. Use one of {}.".format(score, self._available_scores))
         if score == "dot":
@@ -187,6 +189,10 @@ class LuongAttention(nn.Module):
         return query.bmm(self.W(key).transpose(1, 2))
 
     def forward(self, value, key, query):
+        if not self.batch_first:
+            value = value.transpose(0, 1)
+            key = key.transpose(0, 1)
+            query = query.transpose(0, 1)
         scores = self.score_function(key, query)
         attention = softmax(scores, 2)
         return attention.bmm(value), attention
