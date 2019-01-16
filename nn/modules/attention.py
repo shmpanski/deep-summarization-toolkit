@@ -154,10 +154,15 @@ class LuongAttention(nn.Module):
             key_size (int, optional): Stores in **kwargs. Size of :attr:`key`.
             query_size (int, optional): Stores in **kwargs. Size of :attr:`query`.
 
-        Inputs:
-            value (torch.Tensor): Tensor of shape ``(batch, seq, value_size)``: Weighted sequence.
-            key (torch.Tensor): Tensor of shape ``(batch, seq, key_size)``: Weighing sequence.
-            query (torch.Tensor): Tensor of shape ``(batch, q_seq, query_size)``: Query sequence.
+        Inputs: value, key, query
+            - **value** (torch.Tensor): Tensor of shape ``(batch, seq, value_size)``: Weighted sequence.
+            - **key** (torch.Tensor): Tensor of shape ``(batch, seq, key_size)``: Weighing sequence.
+            - **query** (torch.Tensor): Tensor of shape ``(batch, q_seq, query_size)``: Query sequence.
+
+        Outputs: attention, attention_distr
+            - **attention** (torch.Tensor): Tensor of shape ``(batch, q_seq, value_size)``.
+            - **attention_distr** (torch.Tensor): Tensor of shape ``(batch, q_seq, seq)`` containing attention
+              ditribution between :attr:`query` and :attr:`value`.
 
         Note:
             - There is ``concat`` :attr:`score` function, but original formulas are quite strange.
