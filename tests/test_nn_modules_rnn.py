@@ -58,5 +58,5 @@ class TestRNNDecoderMethods(unittest.TestCase):
         output_seq = torch.randn(output_seq_len, batch_size, input_size)
 
         encoder_output, h_e = encoder(input_seq, input_seq_lens)
-        output, _ = decoder(output_seq, encoder_output, output_seq_lens, h_e)
+        output, _, _ = decoder(output_seq, encoder_output, h_e, output_seq_lens)
         self.assertTupleEqual(output.shape, (output_seq_len, batch_size, hidden_size * 2))
