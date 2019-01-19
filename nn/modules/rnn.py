@@ -26,10 +26,10 @@ class RNNEncoder(nn.Module):
               initial hidden state.
 
         Outputs: encoder_output, h_n
-            - **encoder_output** (torch.Tensor): Tensor of shape ``(seq, batch, hidden_size * 2)`` containing encoder
+            - **encoder_output** (torch.Tensor): Tensor of shape ``(seq, batch, hidden_size)`` containing encoder
               sequence representations.
-            - **h_n** (torch.Tensor): Tensor of shape ``(num_layers * 2, batch, hidden_size)`` containing the hidden
-              state for `t = seq_len`
+            - **h_n** (torch.Tensor): Tensor of shape ``(num_layers, batch, hidden_size)`` containing the hidden
+              state for `t = seq_len` of forward RNN pass.
 
         Raises:
             ValueError: Raises if :attr:`rnn` is invalid.
@@ -43,8 +43,14 @@ class RNNEncoder(nn.Module):
             raise ValueError("Invalid RNN type `{}`. Use one of {}.".format(rnn, _avaialable_rnns))
 
         self.batch_first = batch_first
+        self.num_layers = num_layers
         self.rnn = nn.RNNBase(rnn, input_size, hidden_size, num_layers, dropout=dropout, bidirectional=True,
                               batch_first=batch_first)
+        self.concat = nn.Sequential(
+            nn.SELU(),
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.SELU()
+        )
 
     def forward(self, input, input_lengths=None, h_0=None):
         packed = input_lengths is not None
@@ -53,7 +59,7 @@ class RNNEncoder(nn.Module):
         encoder_output, h_n = self.rnn(input, h_0)
         if packed:
             encoder_output, _ = pad_packed_sequence(encoder_output, batch_first=self.batch_first)
-        return encoder_output, h_n
+        return self.concat(encoder_output), h_n[:self.num_layers]
 
 
 class RNNDecoder(nn.Module):
@@ -71,15 +77,15 @@ class RNNDecoder(nn.Module):
 
         Inputs: input, encoder_output, h_0, input_lengths
             - **input** (torch.Tensor): Tensor of shape ``(input_seq, batch, input_size)``.
-            - **encoder_output** (torch.Tensor): Tensor of shape ``(encoder_seq, batch, hidden_size * 2)``
+            - **encoder_output** (torch.Tensor): Tensor of shape ``(encoder_seq, batch, hidden_size)``
               containing encoder sequence representations.
-            - **h_0** (torch.Tensor, optional): Tensor of shape ``(num_layers * 2, batch, hidden_size)``
+            - **h_0** (torch.Tensor, optional): Tensor of shape ``(num_layers, batch, hidden_size)``
               containing initial hidden state.
             - **input_lengths** (iterable, optional): Collection of sequences length for each batch element in
               decreasing order. If not `None`, uses for PackedSequence.
 
         Outputs: output, attention_distr
-            - **output** (torch.Tensor): Tensor of shape ``(input_seq, batch, hidden_size * 2)``.
+            - **output** (torch.Tensor): Tensor of shape ``(input_seq, batch, hidden_size)``.
             - **attention_distr** (torch.Tensor): Tensor of shape ``(batch, input_seq, encoder_seq)``
               containing attention ditribution between :attr:`query` and :attr:`value`.
 
@@ -96,13 +102,14 @@ class RNNDecoder(nn.Module):
             raise ValueError("Invalid RNN type `{}`. Use one of {}.".format(rnn, _avaialable_rnns))
 
         self.batch_first = batch_first
-        self.rnn = nn.RNNBase(rnn, input_size, hidden_size, num_layers, dropout=dropout, bidirectional=True,
+        self.rnn = nn.RNNBase(rnn, input_size, hidden_size, num_layers, dropout=dropout, bidirectional=False,
                               batch_first=batch_first)
         self.attention = LuongAttention(attention, batch_first=batch_first,
-                                        query_size=hidden_size * 2,
-                                        key_size=hidden_size * 2)
+                                        query_size=hidden_size,
+                                        key_size=hidden_size)
         self.out = nn.Sequential(
-            nn.Linear(4 * hidden_size, 2 * hidden_size),
+            nn.SELU(),
+            nn.Linear(2 * hidden_size, hidden_size),
             nn.SELU()
         )
 

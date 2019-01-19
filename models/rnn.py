@@ -73,7 +73,7 @@ class SummarizationRNN(BaseSummarizationModel):
         self.encoder = RNNEncoder(embedding_size, hidden_size, num_layers, rnn, dropout, batch_first=True)
         self.decoder = RNNDecoder(embedding_size, hidden_size, num_layers, rnn, attention, dropout, batch_first=True)
         self.out_to_vocab = nn.Sequential(
-            nn.Linear(hidden_size * 2, vocab_size)
+            nn.Linear(hidden_size, vocab_size)
         )
 
     def forward(self, source, target, source_lengths=None, target_lengths=None):
