@@ -1,2 +1,2 @@
 from .modules import Transformer, TransformerEncoderLayer, TransformerDecoderLayer, ScaledDotProductAttention, \
-    MultiHeadAttention, PositionalEmbedding, PositionWise
+    MultiHeadAttention, PositionalEmbedding, PositionWise, RNNEncoder, RNNDecoder

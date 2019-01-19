@@ -142,3 +142,62 @@ class MultiHeadAttention(nn.Module):
             Stacked input tensor n_head times of shape `(n_heads, batch * x, dim_m)`.
         """
         return tensor.view(-1, self.dim_m).repeat(self.n_heads, 1, 1)
+
+
+class LuongAttention(nn.Module):
+    def __init__(self, score="dot", batch_first=True, **kwargs):
+        """Luong Attention Model
+
+        Args:
+            score (str, optional): Defaults to "dot". One of :attr:`score` function. Available: ``dot`` and ``general``.
+            batch_first (bool, optional): Defaults to `True`. If False, swap axis and use ``0`` dimension as sequence.
+            key_size (int, optional): Stores in **kwargs. Size of :attr:`key`.
+            query_size (int, optional): Stores in **kwargs. Size of :attr:`query`.
+
+        Inputs: value, key, query
+            - **value** (torch.Tensor): Tensor of shape ``(batch, seq, value_size)``: Weighted sequence.
+            - **key** (torch.Tensor): Tensor of shape ``(batch, seq, key_size)``: Weighing sequence.
+            - **query** (torch.Tensor): Tensor of shape ``(batch, q_seq, query_size)``: Query sequence.
+
+        Outputs: attention, attention_distr
+            - **attention** (torch.Tensor): Tensor of shape ``(batch, q_seq, value_size)``.
+            - **attention_distr** (torch.Tensor): Tensor of shape ``(batch, q_seq, seq)`` containing attention
+              ditribution between :attr:`query` and :attr:`value`.
+
+        Note:
+            - There is ``concat`` :attr:`score` function, but original formulas are quite strange.
+            - In case of use ``dot`` :attr:`score`, :attr:`key_size` and :attr:`query_size` must be equal.
+
+        TODO:
+            Need to deal with ``concat`` :attr:`score` function.
+
+        Raises:
+            ValueError: Raises if pased invalid :attr:`score` function.
+        """
+
+        super(LuongAttention, self).__init__()
+        self._available_scores = ["dot", "general"]
+        self.batch_first = batch_first
+        if score not in self._available_scores:
+            raise ValueError("Invalid attention score `{}`. Use one of {}.".format(score, self._available_scores))
+        if score == "dot":
+            self.score_function = self.score_dot
+        if score == "general":
+            key_size, query_size = kwargs["key_size"], kwargs["query_size"]
+            self.W = nn.Linear(query_size, key_size, bias=False)
+            self.score_function = self.score_general
+
+    def score_dot(self, key, query):
+        return query.bmm(key.transpose(1, 2))
+
+    def score_general(self, key, query):
+        return query.bmm(self.W(key).transpose(1, 2))
+
+    def forward(self, value, key, query):
+        if not self.batch_first:
+            value = value.transpose(0, 1)
+            key = key.transpose(0, 1)
+            query = query.transpose(0, 1)
+        scores = self.score_function(key, query)
+        attention = softmax(scores, 2)
+        return attention.bmm(value), attention
