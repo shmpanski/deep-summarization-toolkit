@@ -1,0 +1,52 @@
+# Example of training/evaluating configs.
+# Model used:
+model: SummarizationRNN
+
+# Model's arguments. Empty to use default arguments.
+margs: 
+  num_layers: 1
+  embedding_size: 100
+  hidden_size: 50
+  dropout: 0
+
+# Dataset used:
+dataset: BPEDataset
+
+# Default BPEDataset's arguments. 
+dargs:
+  init:
+    directory: ./datasets
+    prefix: lenta-100
+    max_sequence_length: 150
+  preprocess:
+    pretrain_emb: True
+    vocab_size: 10000
+    embedding_size: 100
+    # Max sequence length for sentecepiece processor
+    max_sentence_length: 16384
+    workers: 3
+    # Whether to use skip-gram for training word2vec
+    skip_gramm: False
+
+# Optimizer used (from torch.optim):
+optimizer: Adam
+
+# Optimizer arguments
+oargs:
+  lr: 1.0e-4
+  amsgrad: True
+  betas: [0.9, 0.98]
+  eps: 1.0e-9
+
+# Training arguments:
+targs:
+  # Prefix of running model configuration:
+  prefix: test-rnn
+  # Used device
+  device: cuda
+  epochs: 5
+  train_batch_size: 16
+  test_batch_size: 16
+  # checkpoint_interval: 1000
+  # train_log_interval: 100
+  # train_sample_interval: 100
