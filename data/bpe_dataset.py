@@ -3,6 +3,7 @@ import logging
 import os
 from functools import reduce
 from operator import and_
+from itertools import takewhile
 
 import numpy as np
 import sentencepiece
@@ -25,6 +26,7 @@ class BPEDataset(SummarizationDataset):
         self.spm = sentencepiece.SentencePieceProcessor()
         self.spm.load(spm_file_name)
         self.pad_symbol = self.spm.pad_id()
+        self.eos_symbol = self.spm.eos_id()
         self.__len = self.__data.shape[0]
         self.limit = max_sequence_length
 
@@ -40,6 +42,7 @@ class BPEDataset(SummarizationDataset):
         return self.__len
 
     def decode(self, sequences):
+        sequences = [list(takewhile(lambda x: x != self.eos_symbol, sequence)) for sequence in sequences]
         return [self.spm.DecodeIds([token.item() for token in sentence])
                 for sentence in sequences]
 
