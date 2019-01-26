@@ -14,6 +14,9 @@ class BaseSummarizationModel(nn.Module):
     def create_trainer(self, optimizer, device):
         raise NotImplementedError
 
+    def create_evaluator(self, device):
+        raise NotImplementedError
+
     @staticmethod
     def create(dataset, margs):
         raise NotImplementedError
