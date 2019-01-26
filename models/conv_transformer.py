@@ -110,7 +110,7 @@ class ConvTransformer(BaseSummarizationModel):
         for decoder_layer in self.decoder_layers:
             decoder_state = decoder_layer(decoder_state, encoder_state, mask)
 
-        output = self.out(decoder_state)[:, 1:, :]
+        output = self.out(decoder_state)[:, :-1, :]
         return output.contiguous()
 
     def inference(self, source: torch.Tensor, limit: int) -> Tuple[torch.Tensor, torch.Tensor]:
