@@ -87,7 +87,6 @@ class BPEDataset(SummarizationDataset):
 
     @staticmethod
     def __pad_sequence(sequences, pad_symbol=0):
-        sequences = sorted(sequences, key=lambda x: -len(x))
         sequence_lengths = [len(sequence) for sequence in sequences]
         max_len = max(sequence_lengths)
         for i, length in enumerate(sequence_lengths):

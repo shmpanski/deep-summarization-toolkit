@@ -143,8 +143,7 @@ class SummarizationRNN(BaseSummarizationModel):
 
             self.train()
             optimizer.zero_grad()
-            gen_probs, attention_distr = self.forward(batch["src"], batch["trg"],
-                                                      batch["src_length"], batch["trg_length"])
+            gen_probs, attention_distr = self.forward(batch["src"], batch["trg"])
             loss = self.criterion(gen_probs.view(-1, self.vocab_size),
                                   batch["trg"][:, 1:].contiguous().view(-1))
             loss.backward()
@@ -168,7 +167,7 @@ class SummarizationRNN(BaseSummarizationModel):
             batch["trg"] = batch["trg"].to(device)
 
             self.eval()
-            __, generated = self.inference(batch["src"], batch["trg"].shape[1], batch["src_length"])
+            __, generated = self.inference(batch["src"], batch["trg"].shape[1])
 
             return generated, batch["trg"][:, 1:]
         return Engine(_evaluate)
