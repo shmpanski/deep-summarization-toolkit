@@ -4,7 +4,7 @@ import os
 
 import yaml
 
-from train import Trainer
+from dst import Trainer
 
 
 def setup_logging(default_path='logging.yml', default_level=logging.INFO, env_key='LOG_CFG'):

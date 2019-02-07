@@ -7,7 +7,7 @@ formatters:
 
 handlers:
     console:
-        class: utils.TqdmLoggingHandler
+        class: dst.utils.TqdmLoggingHandler
         level: DEBUG
         formatter: simple
 
