@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from nn.modules import RNNEncoder, RNNDecoder
+from dst.nn.modules import RNNEncoder, RNNDecoder
 
 
 class TestRNNEncoderMethods(unittest.TestCase):

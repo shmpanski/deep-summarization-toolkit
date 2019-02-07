@@ -2,7 +2,7 @@ import unittest
 import torch
 from torch import nn
 
-from models import SummarizationTransformer
+from dst.models import SummarizationTransformer
 
 
 class TestSummarizationTransformerMethods(unittest.TestCase):

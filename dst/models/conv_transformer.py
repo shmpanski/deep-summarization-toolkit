@@ -4,9 +4,9 @@ import torch
 from ignite import engine
 from torch import nn, optim
 
-from data import BPEDataset
-from nn.modules import (PositionalEmbedding, TransformerDecoderLayer,
-                        TransformerEncoderLayer)
+from dst.data import BPEDataset
+from dst.nn.modules import (PositionalEmbedding, TransformerDecoderLayer,
+                            TransformerEncoderLayer)
 
 from .base_model import BaseSummarizationModel
 

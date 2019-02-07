@@ -2,7 +2,7 @@ import unittest
 import tempfile
 import os
 
-from data import BPEDataset
+from dst.data import BPEDataset
 
 
 class TestBPEDatasetMethods(unittest.TestCase):

@@ -9,9 +9,9 @@ from ignite.handlers import ModelCheckpoint
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import data
-import models
-from train.metrics import RougeMetric
+from dst import data
+from dst import models
+from dst.utils.metrics import RougeMetric
 
 from tensorboardX import SummaryWriter
 

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from nn.modules import MultiHeadAttention, PositionWise, PositionalEmbedding
+from dst.nn.modules import MultiHeadAttention, PositionWise, PositionalEmbedding
 
 
 class TransformerEncoderLayer(nn.Module):
