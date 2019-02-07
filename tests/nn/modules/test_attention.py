@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from nn.modules import LuongAttention
+from dst.nn.modules import LuongAttention
 
 
 class TestLuongAttentionMethods(unittest.TestCase):

@@ -4,7 +4,7 @@ import torch
 from torch.optim import Adam
 from ignite.engine import Engine
 
-from models import ConvTransformer
+from dst.models import ConvTransformer
 
 
 class TestConvTransformerMethods(unittest.TestCase):

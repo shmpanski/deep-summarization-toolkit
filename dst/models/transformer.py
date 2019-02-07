@@ -2,7 +2,7 @@ import torch
 from ignite.engine import Engine
 from torch import nn
 
-from nn.modules import Transformer
+from dst.nn.modules import Transformer
 
 from .base_model import BaseSummarizationModel
 

@@ -3,7 +3,7 @@ import unittest
 import torch
 import ignite.engine
 
-from models import SummarizationRNN
+from dst.models import SummarizationRNN
 from torch.optim import Adam
 
 

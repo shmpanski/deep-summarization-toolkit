@@ -2,7 +2,7 @@ import torch
 from ignite.engine import Engine
 from torch import nn
 
-from nn import RNNDecoder, RNNEncoder
+from dst.nn import RNNDecoder, RNNEncoder
 
 from .base_model import BaseSummarizationModel
 

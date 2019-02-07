@@ -11,7 +11,7 @@ import torch
 from gensim.models import Word2Vec
 
 from .base_dataset import SummarizationDataset
-from .utils import SentenceIterator, export_embeddings
+from dst.data.utils import SentenceIterator, export_embeddings
 
 
 class BPEDataset(SummarizationDataset):
