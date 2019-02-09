@@ -1,8 +1,10 @@
-import torch.nn as nn
-import torch
-from torch.nn.functional import softmax
-from torch.nn.init import kaiming_normal_
+from typing import Iterable, Tuple
+
 import numpy as np
+import torch
+import torch.nn as nn
+from torch.nn.functional import softmax, pad
+from torch.nn.init import kaiming_normal_
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -142,6 +144,283 @@ class MultiHeadAttention(nn.Module):
             Stacked input tensor n_head times of shape `(n_heads, batch * x, dim_m)`.
         """
         return tensor.view(-1, self.dim_m).repeat(self.n_heads, 1, 1)
+
+
+class MultiHeadPhrasalAttentionBase(nn.Module):
+    def __init__(self):
+        super(MultiHeadPhrasalAttentionBase, self).__init__()
+
+    @staticmethod
+    def stack_mask(mask: torch.ByteTensor, n_heads: int) -> torch.ByteTensor:
+        """Stack mask for required number of heads.
+
+        Args:
+            mask (torch.ByteTensor): Mask tensor of shape ``(batch, x, y)``.
+            n_heads (int): Number of heads.
+
+        Returns:
+            torch.ByteTensor: Mask tensor of shape ``(n_heads * batch, x, y)``.
+        """
+
+        return mask.repeat(n_heads, 1, 1)
+
+    @staticmethod
+    def stack_heads(tensor: torch.Tensor, n_heads: int) -> torch.Tensor:
+        """Stack inputs for attention heads.
+
+        Args:
+            tensor (torch.Tensor): Input tensor of shape ``(batch, seq_len, dim)``.
+            n_heads (int): Number of heads.
+
+        Returns:
+            torch.Tensor: stacked inputs of shape ``(n_heads, batch, seq_len, dim)``.
+        """
+
+        return tensor.repeat(n_heads, 1, 1, 1)
+
+    @staticmethod
+    def stack_convolutions(head_convs: Tuple[int, ...], input_dim: int, output_dim: int) -> Iterable[nn.Conv1d]:
+        """Generate grouped convolution layers for desired heads.
+
+        Args:
+            head_convs (Tuple[int, ...]): Tuple of convolution head distribution.
+              For example, (1, 0, 3) means one head of 1 kernel convolution and three heads of 3 kernel convolution.
+            input_dim (int): Input dimension.
+            output_dim (int): Output dimension
+
+        Returns:
+            Iterable[nn.Conv1d]: convoluion modules
+        """
+
+        for kernel_size, n_heads in enumerate(head_convs, 1):
+            if n_heads != 0:
+                yield nn.Conv1d(in_channels=n_heads * input_dim,
+                                out_channels=n_heads * output_dim,
+                                kernel_size=kernel_size,
+                                groups=n_heads)
+
+
+class MultiHeadHomogeneousAttention(MultiHeadPhrasalAttentionBase):
+    """Multi Head Homogeneous Attention.
+    See https://arxiv.org/abs/1810.03444 for more details.
+
+    Args:
+        dim_m (int): Model dimension.
+        dim_proj (int): Projection dimension.
+        head_convs (Tuple[int]): Description of convolution distribution per head. For example: (3, 2, 3) means
+            three heads with one-kernel convolution, two heads with two-kernel convolution and three heads with
+            three-kernel convolutions.
+        dropout (float, optional): Defaults to 0.1. Dropout probability.
+
+    Inputs:
+        - **value** of shape `(batch, seq_len, dim_m)`: a float tensor containing `value`.
+        - **key** of shape `(batch, seq_len, dim_m)`: a float tensor containing `key`.
+        - **query** of shape `(batch, q_len, dim_m)`: a float tensor containing `query`.
+        - **mask** of shape `(batch, q_len, seq_len)`: default None: a byte tensor containing mask for
+            illegal connections between query and value.
+
+    Outputs:
+        - **attention** of shape `(batch, q_len, dim_m)`: a float tensor containing attention
+            along `query` and `value` with the corresponding `key` attention mechanism.
+    """
+
+    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], dropout=0.1):
+        super(MultiHeadHomogeneousAttention, self).__init__()
+
+        self.head_convs = head_convs
+        self.total_n_heads = sum(head_convs)
+        self.dim_m = dim_m
+        self.dim_proj = dim_proj
+
+        self.query_projections = nn.ModuleList(self.stack_convolutions((self.total_n_heads, ), dim_m, dim_proj))
+        self.value_projections = nn.ModuleList(self.stack_convolutions(head_convs, dim_m, dim_proj))
+        self.key_projection = nn.ModuleList(self.stack_convolutions(head_convs, dim_m, dim_proj))
+        self.attention = ScaledDotProductAttention(dim_proj)
+        self.output = nn.Linear(dim_proj * self.total_n_heads, dim_m)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_normalization = nn.LayerNorm(dim_m, eps=1e-12)
+
+    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor, mask: torch.Tensor = None) \
+            -> torch.Tensor:
+        batch_size, q_len, _ = query.shape
+        residual = query
+
+        # (batch, q_len, dim_m) -> (n_heads * batch, q_len, dim_proj)
+        query = self.calculate_conv_heads(query, self.query_projections, (self.total_n_heads, ))
+        query = query.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+        # (batch, batch, v_len, dim_m) -> (n_heads * batch, v_len, dim_proj)
+        value = self.calculate_conv_heads(value, self.value_projections, self.head_convs)
+        value = value.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+        # (batch, batch, k_len, dim_m) -> (n_heads * batch, k_len, dim_proj)
+        key = self.calculate_conv_heads(key, self.key_projection, self.head_convs)
+        key = key.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+
+        if mask is not None:
+            mask = self.stack_mask(mask, self.total_n_heads)
+
+        # (n_heads * batch, q_len, dim_v)
+        context, _ = self.attention(value, key, query, mask)
+
+        # (n_heads * batch, q_len, dim_v) -> (batch, q_len, n_heads * dim_v)
+        context_heads = context.split(batch_size, dim=0)
+        concat_heads = torch.cat(context_heads, dim=-1)
+
+        # (batch, q_len, n_heads * dim_v) -> (batch, q_len, dim_m)
+        out = self.output(concat_heads)
+        out = self.dropout(out)
+
+        return self.layer_normalization(out + residual)
+
+    def calculate_conv_heads(self, input: torch.Tensor, conv_layers: Iterable[nn.Conv1d], head_convs: Tuple[int]) \
+            -> torch.Tensor:
+        """Calculate convolution for heads.
+
+        Args:
+            input (torch.Tensor): Input tensor.
+            conv_layers (Iterable[nn.Conv1d]): Convolution layers.
+            head_convs (Tuple[int]): Tuple of convolution kernels per heads.
+
+        Returns:
+            torch.Tensor: Tensor of shape ``(n_heads, batch, seq_len, dim_proj)``.
+        """
+
+        conv_layers = iter(conv_layers)
+        batch_size, seq_len, dim = input.shape
+        # (n_heads, batch, x, dim) -> (batch, n_heads * dim, x)
+        heads = []
+        for kernel_size, n_heads in enumerate(head_convs, 1):
+            if n_heads == 0:
+                continue
+            # (n_heads, batch, seq_len, dim)
+            stacked_input = MultiHeadPhrasalAttentionBase.stack_heads(input, n_heads)
+            # (batch, n_heads*dim, seq_len)
+            stacked_input = stacked_input.permute(1, 0, 3, 2).contiguous().view(batch_size, n_heads * dim, -1)
+            stacked_input = pad(stacked_input, (kernel_size - 1, 0))
+            layer = next(conv_layers)
+            # (batch, n_heads, dim_proj, convolved_seq_len)
+            head = layer(stacked_input).view(batch_size, n_heads, self.dim_proj, -1)
+            # (n_heads, batch, convolved_seq_len, dim_proj)
+            heads.append(head.permute(1, 0, 3, 2))
+        heads = torch.cat(heads, dim=0).contiguous()
+        return heads
+
+
+class MultiHeadHeterogeneousAttention(MultiHeadPhrasalAttentionBase):
+    """Multi Head Heterogeneous Attention.
+    See https://arxiv.org/abs/1810.03444 for more details.
+
+    Args:
+        dim_m (int): Model dimension.
+        dim_proj (int): Projection dimension.
+        head_convs (Tuple[int]): Description of using convolution stack. For example: (1, 0, 3) means, that in each
+          head concatentaion of one and two kernel convolutions representations will be used.
+        n_heads (int): Total number of attention heads.
+        dropout (float, optional): Defaults to 0.1. Dropout probability.
+
+    Inputs:
+        - **value** of shape `(batch, seq_len, dim_m)`: a float tensor containing `value`.
+        - **key** of shape `(batch, seq_len, dim_m)`: a float tensor containing `key`.
+        - **query** of shape `(batch, q_len, dim_m)`: a float tensor containing `query`.
+        - **mask** of shape `(batch, q_len, seq_len)`: default None: a byte tensor containing mask for
+            illegal connections between query and value.
+
+    Outputs:
+        - **attention** of shape `(batch, q_len, dim_m)`: a float tensor containing attention
+            along `query` and `value` with the corresponding `key` attention mechanism.
+    """
+
+    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], n_heads: int, dropout=0.1):
+        super(MultiHeadHeterogeneousAttention, self).__init__()
+        self.total_n_heads = n_heads
+        self.dim_m = dim_m
+        self.dim_proj = dim_proj
+        self.head_convs = tuple((0 if convs == 0 else n_heads for convs in head_convs))
+
+        self.query_projections = nn.ModuleList(self.stack_convolutions((self.total_n_heads, ), dim_m, dim_proj))
+        self.value_projections = nn.ModuleList(self.stack_convolutions(self.head_convs, dim_m, dim_proj))
+        self.key_projection = nn.ModuleList(self.stack_convolutions(self.head_convs, dim_m, dim_proj))
+        self.attention = ScaledDotProductAttention(dim_proj)
+        self.output = nn.Linear(dim_proj * self.total_n_heads, dim_m)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_normalization = nn.LayerNorm(dim_m, eps=1e-12)
+
+    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor, mask: torch.Tensor = None) \
+            -> torch.Tensor:
+        batch_size, q_len, _ = query.shape
+        residual = query
+
+        # (batch, q_len, dim_m) -> (n_heads * batch, q_len, dim_proj)
+        query = self.calculate_conv_heads(query, self.query_projections, (self.total_n_heads, ))
+        query = query.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+        # (batch, batch, v_len, dim_m) -> (n_heads * batch, v_len, dim_proj)
+        value = self.calculate_conv_heads(value, self.value_projections, self.head_convs)
+        value = value.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+        # (batch, batch, k_len, dim_m) -> (n_heads * batch, k_len, dim_proj)
+        key = self.calculate_conv_heads(key, self.key_projection, self.head_convs)
+        key = key.view(self.total_n_heads * batch_size, -1, self.dim_proj)
+
+        if mask is not None:
+            mask = MultiHeadHeterogeneousAttention.stack_mask(mask, self.head_convs)
+
+        # (n_heads * batch, q_len, dim_v)
+        context, _ = self.attention(value, key, query, mask)
+
+        # (n_heads * batch, q_len, dim_v) -> (batch, q_len, n_heads * dim_v)
+        context_heads = context.split(batch_size, dim=0)
+        concat_heads = torch.cat(context_heads, dim=-1)
+
+        # (batch, q_len, n_heads * dim_v) -> (batch, q_len, dim_m)
+        out = self.output(concat_heads)
+        out = self.dropout(out)
+
+        return self.layer_normalization(out + residual)
+
+    def calculate_conv_heads(self, input: torch.Tensor, conv_layers: Iterable[nn.Conv1d], head_convs: Tuple[int]) \
+            -> torch.Tensor:
+        """Calculate convolution for heads.
+
+        Args:
+            input (torch.Tensor): Input tensor.
+            conv_layers (Iterable[nn.Conv1d]): Convolution layers.
+            head_convs (Tuple[int]): Tuple of convolution kernels per heads.
+
+        Returns:
+            torch.Tensor: Tensor of shape ``(n_heads, batch, convolved_multiple_ngrams, dim_proj)``.
+        """
+
+        conv_layers = iter(conv_layers)
+        batch_size, seq_len, dim = input.shape
+
+        # (n_heads, batch, seq_len, dim)
+        stacked_input = MultiHeadPhrasalAttentionBase.stack_heads(input, self.total_n_heads)
+        # (batch, n_heads*dim, seq_len)
+        stacked_input = stacked_input.permute(1, 0, 3, 2).contiguous().view(batch_size, self.total_n_heads * dim, -1)
+
+        heads = []
+        for kernel_size, n_heads in enumerate(head_convs, 1):
+            if n_heads == 0:
+                continue
+            if seq_len < kernel_size:
+                break
+            layer = next(conv_layers)
+            # (batch, n_heads, dim_proj, convolved_seq_len)
+            head = layer(stacked_input).view(batch_size, n_heads, self.dim_proj, -1).permute(1, 0, 3, 2)
+            # (n_heads, batch, prev_convolved_n-grams + convolved_seq_len, dim_proj)
+            heads.append(head)
+        return torch.cat(heads, dim=2).contiguous()
+
+    @staticmethod
+    def stack_mask(mask: torch.Tensor, head_convs: Tuple[int]) -> torch.Tensor:
+        batch_size, q_len, v_len = mask.shape
+        stacked_mask = []
+        for kernel_size, n_heads in enumerate(head_convs, 1):
+            if n_heads == 0:
+                continue
+            if q_len < kernel_size:
+                break
+            stacked_mask.append(torch.narrow(mask, -1, kernel_size - 1, v_len - kernel_size + 1))
+        stacked_mask = torch.cat(stacked_mask, dim=-1)
+        return stacked_mask.repeat(head_convs[0], 1, 1)
 
 
 class LuongAttention(nn.Module):
