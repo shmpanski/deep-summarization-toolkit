@@ -88,17 +88,11 @@ class Trainer:
 
         init_args = dargs["init"]
         preprocess_args = dargs["preprocess"]
-        data_parts = ["train", "test"]
         dataset_class = getattr(data, name)
-        if dataset_class.exist(init_args["directory"], init_args["prefix"], data_parts):
-            logging.info("Found dataset dumps")
-            train_dataset = dataset_class(**init_args, part="train")
-            test_dataset = dataset_class(**init_args, part="test")
-        else:
-            logging.info("Start preprocess dataset")
-            train_dataset, test_dataset = dataset_class.preprocess(parts=data_parts,
-                                                                   **init_args,
-                                                                   **preprocess_args)
+
+        train_dataset = dataset_class(part="train", **init_args, **preprocess_args)
+        test_dataset = dataset_class(part="test", **init_args, spm=train_dataset.get_spm())
+
         return train_dataset, test_dataset
 
     def instantiate_model(self, name, marg):
