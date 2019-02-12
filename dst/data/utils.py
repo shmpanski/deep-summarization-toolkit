@@ -1,5 +1,19 @@
 import csv
+import logging
+import os
+import typing
+
+import nltk
 import numpy as np
+import urllib
+from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt")
 
 
 class SentenceIterator:
@@ -50,3 +64,46 @@ def export_embeddings(filename, sp_model, w2v_model):
         for i in range(vocab_size)
     ])
     np.save(filename, table)
+
+
+def split_into_sentences(text: str) -> typing.List[str]:
+    """Split text into sentences.
+
+    Args:
+        text (str): Text.
+
+    Returns:
+        typing.List[str]: Sentences.
+    """
+
+    return nltk.sent_tokenize(text)
+
+
+def download_url(url: str,
+                 directory: str,
+                 filename: str = None) -> str:
+    directory = os.path.normpath(directory)
+    if not filename:
+        filename = os.path.basename(url)
+    filepath = os.path.join(directory, filename)
+    os.makedirs(directory, exist_ok=True)
+
+    if not os.path.isfile(filepath):
+        logger.info('Downloading ' + url + ' to ' + filepath)
+        with tqdm(unit='B', unit_scale=True) as pbar:
+            urllib.request.urlretrieve(
+                url, filepath,
+                reporthook=get_bar_updater(pbar)
+            )
+
+    return filepath
+
+
+def get_bar_updater(pbar):
+    def bar_update(count, block_size, total_size):
+        if pbar.total is None and total_size:
+            pbar.total = total_size
+        progress_bytes = count * block_size
+        pbar.update(progress_bytes - pbar.n)
+
+    return bar_update
