@@ -6,6 +6,8 @@ import torch.nn as nn
 from torch.nn.functional import softmax, pad
 from torch.nn.init import kaiming_normal_
 
+from dst.nn.utils import autoregressive_mask
+
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, dim_q_k):
@@ -210,27 +212,27 @@ class MultiHeadHomogeneousAttention(MultiHeadPhrasalAttentionBase):
         head_convs (Tuple[int]): Description of convolution distribution per head. For example: (3, 2, 3) means
             three heads with one-kernel convolution, two heads with two-kernel convolution and three heads with
             three-kernel convolutions.
+        masked (bool): Defaults to False. Whether to mask illegal connection to sim autoregressive property.
         dropout (float, optional): Defaults to 0.1. Dropout probability.
 
     Inputs:
         - **value** of shape `(batch, seq_len, dim_m)`: a float tensor containing `value`.
         - **key** of shape `(batch, seq_len, dim_m)`: a float tensor containing `key`.
         - **query** of shape `(batch, q_len, dim_m)`: a float tensor containing `query`.
-        - **mask** of shape `(batch, q_len, seq_len)`: default None: a byte tensor containing mask for
-            illegal connections between query and value.
 
     Outputs:
         - **attention** of shape `(batch, q_len, dim_m)`: a float tensor containing attention
             along `query` and `value` with the corresponding `key` attention mechanism.
     """
 
-    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], dropout=0.1):
+    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], masked=False, dropout=0.1):
         super(MultiHeadHomogeneousAttention, self).__init__()
 
         self.head_convs = head_convs
         self.total_n_heads = sum(head_convs)
         self.dim_m = dim_m
         self.dim_proj = dim_proj
+        self.masked = masked
 
         self.query_projections = nn.ModuleList(self.stack_convolutions((self.total_n_heads, ), dim_m, dim_proj))
         self.value_projections = nn.ModuleList(self.stack_convolutions(head_convs, dim_m, dim_proj))
@@ -240,7 +242,7 @@ class MultiHeadHomogeneousAttention(MultiHeadPhrasalAttentionBase):
         self.dropout = nn.Dropout(dropout)
         self.layer_normalization = nn.LayerNorm(dim_m, eps=1e-12)
 
-    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor, mask: torch.Tensor = None) \
+    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor) \
             -> torch.Tensor:
         batch_size, q_len, _ = query.shape
         residual = query
@@ -255,8 +257,11 @@ class MultiHeadHomogeneousAttention(MultiHeadPhrasalAttentionBase):
         key = self.calculate_conv_heads(key, self.key_projection, self.head_convs)
         key = key.view(self.total_n_heads * batch_size, -1, self.dim_proj)
 
-        if mask is not None:
+        if self.masked:
+            mask = autoregressive_mask(batch_size, (q_len, q_len), query.device)
             mask = self.stack_mask(mask, self.total_n_heads)
+        else:
+            mask = None
 
         # (n_heads * batch, q_len, dim_v)
         context, _ = self.attention(value, key, query, mask)
@@ -315,26 +320,26 @@ class MultiHeadHeterogeneousAttention(MultiHeadPhrasalAttentionBase):
         head_convs (Tuple[int]): Description of using convolution stack. For example: (1, 0, 3) means, that in each
           head concatentaion of one and two kernel convolutions representations will be used.
         n_heads (int): Total number of attention heads.
+        masked (bool): Defaults to False. Whether to mask illegal connection to sim autoregressive property.
         dropout (float, optional): Defaults to 0.1. Dropout probability.
 
     Inputs:
         - **value** of shape `(batch, seq_len, dim_m)`: a float tensor containing `value`.
         - **key** of shape `(batch, seq_len, dim_m)`: a float tensor containing `key`.
         - **query** of shape `(batch, q_len, dim_m)`: a float tensor containing `query`.
-        - **mask** of shape `(batch, q_len, seq_len)`: default None: a byte tensor containing mask for
-            illegal connections between query and value.
 
     Outputs:
         - **attention** of shape `(batch, q_len, dim_m)`: a float tensor containing attention
             along `query` and `value` with the corresponding `key` attention mechanism.
     """
 
-    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], n_heads: int, dropout=0.1):
+    def __init__(self, dim_m: int, dim_proj: int, head_convs: Tuple[int], n_heads: int, masked=False, dropout=0.1):
         super(MultiHeadHeterogeneousAttention, self).__init__()
         self.total_n_heads = n_heads
         self.dim_m = dim_m
         self.dim_proj = dim_proj
         self.head_convs = tuple((0 if convs == 0 else n_heads for convs in head_convs))
+        self.masked = masked
 
         self.query_projections = nn.ModuleList(self.stack_convolutions((self.total_n_heads, ), dim_m, dim_proj))
         self.value_projections = nn.ModuleList(self.stack_convolutions(self.head_convs, dim_m, dim_proj))
@@ -344,7 +349,7 @@ class MultiHeadHeterogeneousAttention(MultiHeadPhrasalAttentionBase):
         self.dropout = nn.Dropout(dropout)
         self.layer_normalization = nn.LayerNorm(dim_m, eps=1e-12)
 
-    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor, mask: torch.Tensor = None) \
+    def forward(self, value: torch.Tensor, key: torch.Tensor, query: torch.Tensor) \
             -> torch.Tensor:
         batch_size, q_len, _ = query.shape
         residual = query
@@ -359,8 +364,11 @@ class MultiHeadHeterogeneousAttention(MultiHeadPhrasalAttentionBase):
         key = self.calculate_conv_heads(key, self.key_projection, self.head_convs)
         key = key.view(self.total_n_heads * batch_size, -1, self.dim_proj)
 
-        if mask is not None:
+        if self.masked:
+            mask = autoregressive_mask(batch_size, (q_len, q_len), query.device)
             mask = MultiHeadHeterogeneousAttention.stack_mask(mask, self.head_convs)
+        else:
+            mask = None
 
         # (n_heads * batch, q_len, dim_v)
         context, _ = self.attention(value, key, query, mask)

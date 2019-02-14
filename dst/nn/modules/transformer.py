@@ -136,9 +136,6 @@ class PBATransformerDecoderLayer(nn.Module):
         - **input**: torch.Tensor of shape ``(batch, inp_seq_len, dim_m)``.
         - **encoder_output**: torch.Tensor of shape ``(batch, enc_seq_len, dim_m)`` containing encoder
           sequence representaion.
-        - **mask**: torch.ByteTensor of shape ``(batch, input_seq_len, enc_seq_len)`` containing mask for
-          illegal connections between encoder and decoder sequence tokens. It's used to preserving
-          the auto-regressive property.
     Outputs:
         - **output**: torch.Tensor of shape ``(batch, inp_seq_len, dim_m)``.
     """
@@ -150,16 +147,18 @@ class PBATransformerDecoderLayer(nn.Module):
         assert attention in _AVAILABLE_ATTENTIONS, message
 
         if attention == _AVAILABLE_ATTENTIONS[0]:
-            self.masked_attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+            self.masked_attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout,
+                                                                  masked=True, **kwargs)
             self.attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
         else:
-            self.masked_attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+            self.masked_attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout,
+                                                                    masked=True, **kwargs)
             self.attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
 
         self.positionwise = PositionWise(dim_m, dim_i, dropout)
 
-    def forward(self, input: torch.Tensor, encoder_output: torch.Tensor, mask: torch.ByteTensor) -> torch.Tensor:
-        dec_att = self.masked_attention(input, input, input, mask)
+    def forward(self, input: torch.Tensor, encoder_output: torch.Tensor) -> torch.Tensor:
+        dec_att = self.masked_attention(input, input, input)
         adj_att = self.attention(
             value=encoder_output, key=encoder_output, query=dec_att)
         output = self.positionwise(adj_att)

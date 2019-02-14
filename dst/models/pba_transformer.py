@@ -8,7 +8,7 @@ from dst.data import BPEDataset
 from dst.models import BaseSummarizationModel
 from dst.nn import (PBATransformerDecoderLayer, PBATransformerEncoderLayer,
                     PositionalEmbedding)
-from dst.nn.utils import autoregressive_mask
+from dst.nn.utils import autoregressive_mask_like
 
 
 class PBATransformer(BaseSummarizationModel):
@@ -68,10 +68,9 @@ class PBATransformer(BaseSummarizationModel):
         for encoder_layer in self.encoder_layers:
             encoder_state = encoder_layer(encoder_state)
 
-        mask = autoregressive_mask(target)
         decoder_state = self.embedding(target)
         for decoder_layer in self.decoder_layers:
-            decoder_state = decoder_layer(decoder_state, encoder_state, mask)
+            decoder_state = decoder_layer(decoder_state, encoder_state)
 
         output = self.out(decoder_state)
         return output
@@ -90,10 +89,9 @@ class PBATransformer(BaseSummarizationModel):
                                    device=source.device)
 
         for _ in range(limit):
-            mask = autoregressive_mask(generated_seq)
             decoder_state = self.embedding(generated_seq)
             for decoder_layer in self.decoder_layers:
-                decoder_state = decoder_layer(decoder_state, encoder_state, mask)
+                decoder_state = decoder_layer(decoder_state, encoder_state)
 
             output_distr = self.out(decoder_state)
             last_generated_token_idx = output_distr[:, -1, :].argmax(dim=-1).unsqueeze(1)

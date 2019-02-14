@@ -38,10 +38,9 @@ class TestPBATransformerDecoderLayer(unittest.TestCase):
 
         input_seq = torch.randn(batch_size, inp_seq_len, dim_m)
         encoder_seq = torch.randn(batch_size, enc_seq_len, dim_m)
-        mask = torch.zeros(batch_size, inp_seq_len, inp_seq_len, dtype=torch.uint8)
 
         layer = PBATransformerDecoderLayer(dim_m, dim_proj, dim_i, dropout, attention, **attention_args)
-        out = layer(input_seq, encoder_seq, mask)
+        out = layer(input_seq, encoder_seq)
 
         self.assertTupleEqual(out.shape, input_seq.shape)
 
@@ -53,9 +52,8 @@ class TestPBATransformerDecoderLayer(unittest.TestCase):
 
         input_seq = torch.randn(batch_size, inp_seq_len, dim_m)
         encoder_seq = torch.randn(batch_size, enc_seq_len, dim_m)
-        mask = torch.zeros(batch_size, inp_seq_len, inp_seq_len, dtype=torch.uint8)
 
         layer = PBATransformerDecoderLayer(dim_m, dim_proj, dim_i, dropout, attention, **attention_args)
-        out = layer(input_seq, encoder_seq, mask)
+        out = layer(input_seq, encoder_seq)
 
         self.assertTupleEqual(out.shape, input_seq.shape)

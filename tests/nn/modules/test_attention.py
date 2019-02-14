@@ -60,12 +60,10 @@ class TestMultiHeadPhrasalAttentionBaseMethods(unittest.TestCase):
 
 
 class TestMultiHeadHomogeneousAttentionMethods(unittest.TestCase):
-    def setUp(self):
+    def test_calculate_conv_heads(self):
         self.attention = MultiHeadHomogeneousAttention(dim_m=64,
                                                        dim_proj=32,
                                                        head_convs=(2, 0, 2))
-
-    def test_calculate_conv_heads(self):
         batch_size, inp_seq_len = 8, 10
         value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
 
@@ -74,17 +72,21 @@ class TestMultiHeadHomogeneousAttentionMethods(unittest.TestCase):
                               (self.attention.total_n_heads, batch_size, inp_seq_len, self.attention.dim_proj))
 
     def test_forward_masked(self):
-        batch_size, inp_seq_len, out_seq_len = 8, 10, 10
-        value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
-        key = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
-        query = torch.randn(batch_size, out_seq_len, self.attention.dim_m)
-        mask = torch.ones((batch_size, out_seq_len, out_seq_len), dtype=torch.uint8)
+        self.attention = MultiHeadHomogeneousAttention(dim_m=64,
+                                                       dim_proj=32,
+                                                       head_convs=(2, 0, 2),
+                                                       masked=True)
+        batch_size, inp_seq_len = 8, 10
+        tensor = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
 
-        result = self.attention(value, key, query, mask)
+        result = self.attention(tensor, tensor, tensor)
 
-        self.assertTupleEqual(result.shape, (batch_size, out_seq_len, self.attention.dim_m))
+        self.assertTupleEqual(result.shape, (batch_size, inp_seq_len, self.attention.dim_m))
 
     def test_forward(self):
+        self.attention = MultiHeadHomogeneousAttention(dim_m=64,
+                                                       dim_proj=32,
+                                                       head_convs=(2, 0, 2))
         batch_size, inp_seq_len, out_seq_len = 8, 10, 7
         value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
         key = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
@@ -96,13 +98,11 @@ class TestMultiHeadHomogeneousAttentionMethods(unittest.TestCase):
 
 
 class TestMultiHeadHeterogeneousAttentionMethods(unittest.TestCase):
-    def setUp(self):
+    def test_calculate_conv_heads(self):
         self.attention = MultiHeadHeterogeneousAttention(dim_m=64,
                                                          dim_proj=32,
                                                          head_convs=(1, 2, 3),
                                                          n_heads=8)
-
-    def test_calculate_conv_heads(self):
         batch_size, inp_seq_len = 8, 10
         value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
 
@@ -111,17 +111,23 @@ class TestMultiHeadHeterogeneousAttentionMethods(unittest.TestCase):
                               (self.attention.total_n_heads, batch_size, 3 * inp_seq_len - 3, self.attention.dim_proj))
 
     def test_forward_masked(self):
-        batch_size, inp_seq_len, out_seq_len = 8, 10, 10
-        value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
-        key = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
-        query = torch.randn(batch_size, out_seq_len, self.attention.dim_m)
-        mask = torch.ones((batch_size, out_seq_len, out_seq_len), dtype=torch.uint8)
+        self.attention = MultiHeadHeterogeneousAttention(dim_m=64,
+                                                         dim_proj=32,
+                                                         head_convs=(1, 2, 3),
+                                                         n_heads=8,
+                                                         masked=True)
+        batch_size, inp_seq_len = 8, 10
+        tensor = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
 
-        result = self.attention(value, key, query, mask)
+        result = self.attention(tensor, tensor, tensor)
 
-        self.assertTupleEqual(result.shape, (batch_size, out_seq_len, self.attention.dim_m))
+        self.assertTupleEqual(result.shape, (batch_size, inp_seq_len, self.attention.dim_m))
 
     def test_forward(self):
+        self.attention = MultiHeadHeterogeneousAttention(dim_m=64,
+                                                         dim_proj=32,
+                                                         head_convs=(1, 2, 3),
+                                                         n_heads=8)
         batch_size, inp_seq_len, out_seq_len = 8, 10, 7
         value = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
         key = torch.randn(batch_size, inp_seq_len, self.attention.dim_m)
