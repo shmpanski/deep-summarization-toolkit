@@ -3,7 +3,8 @@ import torch
 from torch import nn
 
 from dst.nn.modules import (LuongAttention, MultiHeadPhrasalAttentionBase,
-                            MultiHeadHomogeneousAttention, MultiHeadHeterogeneousAttention)
+                            MultiHeadHomogeneousAttention, MultiHeadHeterogeneousAttention,
+                            MultiHeadInterleavedAttention)
 
 
 class TestLuongAttentionMethods(unittest.TestCase):
@@ -136,3 +137,41 @@ class TestMultiHeadHeterogeneousAttentionMethods(unittest.TestCase):
         result = self.attention(value, key, query)
 
         self.assertTupleEqual(result.shape, (batch_size, out_seq_len, self.attention.dim_m))
+
+
+class TestMultiHeadInterleavedAttentionMethods(unittest.TestCase):
+    def test_forward_enoder(self):
+        attention = MultiHeadInterleavedAttention(dim_m=64,
+                                                  kind="encoder")
+
+        batch_size, inp_seq_len = 8, 10
+        tensor = torch.randn(batch_size, inp_seq_len, attention.dim_m)
+
+        result = attention(tensor, tensor, tensor)
+
+        self.assertTupleEqual(result.shape, (batch_size, inp_seq_len, attention.dim_m))
+
+    def test_forward_decoder_masked(self):
+        attention = MultiHeadInterleavedAttention(dim_m=64,
+                                                  kind="decoder",
+                                                  masked=True)
+
+        batch_size, inp_seq_len = 8, 10
+        tensor = torch.randn(batch_size, inp_seq_len, attention.dim_m)
+
+        result = attention(tensor, tensor, tensor)
+
+        self.assertTupleEqual(result.shape, (batch_size, inp_seq_len, attention.dim_m))
+
+    def test_forward_cross(self):
+        attention = MultiHeadInterleavedAttention(dim_m=64,
+                                                  kind="cross")
+
+        batch_size, inp_seq_len, out_seq_len = 8, 10, 7
+        value = torch.randn(batch_size, inp_seq_len, attention.dim_m)
+        key = torch.randn(batch_size, inp_seq_len, attention.dim_m)
+        query = torch.randn(batch_size, out_seq_len, attention.dim_m)
+
+        result = attention(value, key, query)
+
+        self.assertTupleEqual(result.shape, (batch_size, out_seq_len, attention.dim_m))

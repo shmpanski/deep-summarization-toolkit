@@ -431,6 +431,91 @@ class MultiHeadHeterogeneousAttention(MultiHeadPhrasalAttentionBase):
         return stacked_mask.repeat(head_convs[0], 1, 1)
 
 
+class MultiHeadInterleavedAttention(nn.Module):
+    def __init__(self, dim_m: int, kind: str, masked=False, dropout=0.1):
+        super(MultiHeadInterleavedAttention, self).__init__()
+
+        self.kind = kind
+        self.dim_m = dim_m
+        self.masked = masked
+
+        self.q_proj_1 = nn.Conv1d(dim_m, dim_m, 1)
+        self.q_proj_2 = nn.Conv1d(dim_m, dim_m, 2)
+        self.v_proj_1 = nn.Conv1d(dim_m, dim_m, 1)
+        self.v_proj_2 = nn.Conv1d(dim_m, dim_m, 2)
+        self.k_proj_1 = nn.Conv1d(dim_m, dim_m, 1)
+        self.k_proj_2 = nn.Conv1d(dim_m, dim_m, 2)
+
+        self.attention = ScaledDotProductAttention(dim_m)
+
+        if kind == "encoder":
+            self.out_conv = nn.Conv1d(dim_m, dim_m, 3, 2,)
+        elif kind in ["decoder", "cross"]:
+            self.out_conv = nn.Conv1d(dim_m, dim_m, 2, 2)
+        else:
+            raise KeyError("Use one of `encoder`, `decoder` or `cross` kinds.")
+
+        self.dropout = nn.Dropout(dropout)
+        self.layer_normalization = nn.LayerNorm(dim_m, eps=1e-12)
+
+    def forward(self,
+                value: torch.Tensor,
+                key: torch.Tensor,
+                query: torch.Tensor) -> torch.Tensor:
+        batch_size, q_len, _ = query.shape
+        device = query.device
+
+        residual = query
+        value, key, query = [t.transpose(1, 2) for t in [value, key, query]]
+
+        query_convolved_1 = self.q_proj_1(query)
+        query_convolved_2 = self.q_proj_2(query)
+
+        value_convolved = self.calculate_uni_bi_grams(value, self.v_proj_1, self.v_proj_2)
+        key_convolved = self.calculate_uni_bi_grams(key, self.k_proj_1, self.k_proj_2)
+
+        query_convolved_1, query_convolved_2, value_convolved, key_convolved = [t.transpose(1, 2) for t in [
+            query_convolved_1, query_convolved_2, value_convolved, key_convolved
+        ]]
+
+        if self.masked:
+            mask_unigram = torch.cat((autoregressive_mask(batch_size, (q_len, q_len), device, 1),
+                                      autoregressive_mask(batch_size, (q_len, q_len - 1), device, 0)),
+                                     dim=-1)
+
+            mask_bigram = torch.cat((autoregressive_mask(batch_size, (q_len - 1, q_len), device, 2),
+                                     autoregressive_mask(batch_size, (q_len - 1, q_len - 1), device, 1)),
+                                    dim=-1)
+        else:
+            mask_bigram, mask_unigram = None, None
+
+        attention_1, _ = self.attention(value_convolved, key_convolved, query_convolved_1, mask_unigram)
+        attention_2, _ = self.attention(value_convolved, key_convolved, query_convolved_2, mask_bigram)
+
+        attention_1, attention_2 = [t.transpose(1, 2) for t in [attention_1, attention_2]]
+
+        attention_2 = pad(attention_2, (1, 0))
+        # Interleave attention of unigrams and bigrams
+        attention = torch.stack((attention_1, attention_2), dim=-1).view(batch_size, -1, q_len * 2)
+
+        if self.kind == "encoder":
+            attention = pad(attention, (0, 1))
+
+        output = self.out_conv(attention).transpose(1, 2)
+        output = self.dropout(output)
+
+        return self.layer_normalization(output + residual)
+
+    @staticmethod
+    def calculate_uni_bi_grams(tensor: torch.Tensor,
+                               conv_1: nn.Conv1d,
+                               conv_2: nn.Conv1d) -> torch.Tensor:
+        tensor_convolved_1 = conv_1(tensor)
+        tensor_convolved_2 = conv_2(tensor)
+        concatenated = torch.cat((tensor_convolved_1, tensor_convolved_2), dim=-1)
+        return concatenated
+
+
 class LuongAttention(nn.Module):
     def __init__(self, score="dot", batch_first=True, **kwargs):
         """Luong Attention Model

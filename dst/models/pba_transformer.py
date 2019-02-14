@@ -26,7 +26,9 @@ class PBATransformer(BaseSummarizationModel):
                  **kwargs):
         super(PBATransformer, self).__init__()
 
-        if 'n_heads' in kwargs:
+        if attention == "interleaved":
+            n_heads = 1
+        elif 'n_heads' in kwargs:
             n_heads = kwargs['n_heads']
         else:
             n_heads = sum(kwargs['head_convs'])
@@ -34,6 +36,7 @@ class PBATransformer(BaseSummarizationModel):
 
         dim_proj = dim_m // n_heads
 
+        self.attention = attention
         self.initial_token_idx = initial_token_idx
         self.criterion = nn.CrossEntropyLoss(ignore_index=0)
 
@@ -83,7 +86,8 @@ class PBATransformer(BaseSummarizationModel):
         for encoder_layer in self.encoder_layers:
             encoder_state = encoder_layer(encoder_state)
 
-        generated_seq = torch.full((batch_size, 1),
+        initial_tokens = 2 if self.attention == "interleaved" else 1
+        generated_seq = torch.full((batch_size, initial_tokens),
                                    self.initial_token_idx,
                                    dtype=torch.long,
                                    device=source.device)
@@ -96,7 +100,7 @@ class PBATransformer(BaseSummarizationModel):
             output_distr = self.out(decoder_state)
             last_generated_token_idx = output_distr[:, -1, :].argmax(dim=-1).unsqueeze(1)
             generated_seq = torch.cat((generated_seq, last_generated_token_idx), dim=-1)
-        return generated_seq[:, 1:].contiguous(), output_distr
+        return generated_seq[:, initial_tokens:].contiguous(), output_distr[:, initial_tokens - 1:, :].contiguous()
 
     def create_trainer(self, optimizer: optim.Optimizer, device: torch.device) -> Engine:
         """Create :class:`ignite.Engine` trainer.

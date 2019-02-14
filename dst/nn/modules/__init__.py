@@ -2,6 +2,7 @@ from .attention import (MultiHeadAttention,
                         MultiHeadPhrasalAttentionBase,
                         MultiHeadHomogeneousAttention,
                         MultiHeadHeterogeneousAttention,
+                        MultiHeadInterleavedAttention,
                         ScaledDotProductAttention,
                         LuongAttention)
 from .position_wise import PositionWise

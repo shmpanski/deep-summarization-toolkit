@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 
 from dst.nn.modules import (MultiHeadAttention, PositionWise, PositionalEmbedding,
-                            MultiHeadHomogeneousAttention, MultiHeadHeterogeneousAttention)
+                            MultiHeadHomogeneousAttention, MultiHeadHeterogeneousAttention,
+                            MultiHeadInterleavedAttention)
 
-_AVAILABLE_ATTENTIONS = ["homogeneous", "heterogeneous"]
+_AVAILABLE_ATTENTIONS = ["homogeneous", "heterogeneous", "interleaved"]
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -108,8 +109,10 @@ class PBATransformerEncoderLayer(nn.Module):
 
         if attention == _AVAILABLE_ATTENTIONS[0]:
             self.attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
-        else:
+        elif attention == _AVAILABLE_ATTENTIONS[1]:
             self.attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        else:
+            self.attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, kind="encoder", **kwargs)
 
         self.positionwise = PositionWise(dim_m, dim_i, dropout)
 
@@ -150,10 +153,14 @@ class PBATransformerDecoderLayer(nn.Module):
             self.masked_attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout,
                                                                   masked=True, **kwargs)
             self.attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
-        else:
+        elif attention == _AVAILABLE_ATTENTIONS[1]:
             self.masked_attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout,
                                                                     masked=True, **kwargs)
             self.attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        else:
+            self.masked_attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, masked=True,
+                                                                  kind="decoder", **kwargs)
+            self.attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, kind="cross", **kwargs)
 
         self.positionwise = PositionWise(dim_m, dim_i, dropout)
 
