@@ -11,6 +11,7 @@ class TestBPEDatasetMethods(unittest.TestCase):
         self.prefix = "test"
         self.part = "train"
         self.dev_part = "dev"
+        self.test_part = "test"
         self.workdir = os.path.join(self.directory.name, self.prefix)
 
         train_source_file_name = os.path.join(self.directory.name, "train.tsv")
@@ -26,6 +27,12 @@ class TestBPEDatasetMethods(unittest.TestCase):
                                  "I like cats and dogs\tCats and dogs\r\n",
                                  "There is an apple on the table\tApple on the table\r\n",
                                  "I like cats and dogs\tCats and dogs\r\n"])
+
+        test_source_file_name = os.path.join(self.directory.name, "test.tsv")
+        with open(test_source_file_name, "w+") as test_file:
+            test_file.writelines(["I have writen some code\tWrite code\r\n",
+                                  "There is an apple on the table\tApple on the table\r\n",
+                                  "I like cats and dogs\tCats and dogs\r\n"])
 
     def tearDown(self):
         self.directory.cleanup()
@@ -61,10 +68,10 @@ class TestBPEDatasetMethods(unittest.TestCase):
     def test_init_multiple_parts(self):
         train_dataset = BPEDataset(self.directory.name, self.prefix, self.part,
                                    vocab_size=30, embedding_size=64)
-        dev_dataset = BPEDataset(self.directory.name, self.prefix, self.dev_part,
-                                 spm=train_dataset.spm)
-        exist = BPEDataset.exist(self.directory.name, self.prefix, "dev")
-        self.assertEqual(len(dev_dataset), 5)
+        test_dataset = BPEDataset(self.directory.name, self.prefix, self.test_part,
+                                  spm=train_dataset.spm)
+        exist = BPEDataset.exist(self.directory.name, self.prefix, "test")
+        self.assertEqual(len(test_dataset), 3)
         self.assertTrue(exist)
 
     def test_get_embeddings(self):
