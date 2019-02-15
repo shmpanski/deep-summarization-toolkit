@@ -1,7 +1,11 @@
 import torch
 import torch.nn as nn
 
-from dst.nn.modules import MultiHeadAttention, PositionWise, PositionalEmbedding
+from dst.nn.modules import (MultiHeadAttention, PositionWise, PositionalEmbedding,
+                            MultiHeadHomogeneousAttention, MultiHeadHeterogeneousAttention,
+                            MultiHeadInterleavedAttention)
+
+_AVAILABLE_ATTENTIONS = ["homogeneous", "heterogeneous", "interleaved"]
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -72,6 +76,96 @@ class TransformerDecoderLayer(nn.Module):
 
     def forward(self, input, encoder_output, mask):
         dec_att = self.masked_attention(input, input, input, mask)
+        adj_att = self.attention(
+            value=encoder_output, key=encoder_output, query=dec_att)
+        output = self.positionwise(adj_att)
+
+        return output
+
+
+class PBATransformerEncoderLayer(nn.Module):
+    """Pharasal Based Attention Transformer Encoder Layer.
+
+    Args:
+        dim_m (int): Model dimension.
+        dim_proj (int): Projection dimension.
+        dim_i (int): Inner model dimension.
+        dropout (float): Dropout probability.
+        attention (str): Attention type. One of ``homogeneous`` and ``heterogeneous``.
+        **kwargs: Attention parameters.
+
+    Inputs:
+        - **input**: torch.FloatTensor of shape ``(batch, seq_len, dim_m)``.
+    Outputs:
+        - **output**: torch.FloatTensor of shape ``(batch, seq_len, dim_m)``.
+
+    """
+
+    def __init__(self, dim_m: int, dim_proj: int, dim_i: int, dropout: float, attention: str, **kwargs):
+        super(PBATransformerEncoderLayer, self).__init__()
+
+        message = "Choose one of available attentions: " + ", ".join(_AVAILABLE_ATTENTIONS)
+        assert attention in _AVAILABLE_ATTENTIONS, message
+
+        if attention == _AVAILABLE_ATTENTIONS[0]:
+            self.attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        elif attention == _AVAILABLE_ATTENTIONS[1]:
+            self.attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        else:
+            self.attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, kind="encoder", **kwargs)
+
+        self.positionwise = PositionWise(dim_m, dim_i, dropout)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        enc_att = self.attention(input, input, input)
+        output = self.positionwise(enc_att)
+
+        return output
+
+
+class PBATransformerDecoderLayer(nn.Module):
+    """Phrasal Based Attention Transformer Decoder Layer.
+
+    Args:
+        nn ([type]): [description]
+        dim_m (int): Model dimension.
+        dim_proj (int): Projection dimension.
+        dim_i (int): Inner model dimension.
+        dropout (float): Dropout probability.
+        attention (str): Attention type. One of ``homogeneous`` or ``geterogeneous``.
+        **kwargs: Attention parameters.
+
+    Inputs:
+        - **input**: torch.Tensor of shape ``(batch, inp_seq_len, dim_m)``.
+        - **encoder_output**: torch.Tensor of shape ``(batch, enc_seq_len, dim_m)`` containing encoder
+          sequence representaion.
+    Outputs:
+        - **output**: torch.Tensor of shape ``(batch, inp_seq_len, dim_m)``.
+    """
+
+    def __init__(self, dim_m: int, dim_proj: int, dim_i: int, dropout: float, attention: str, **kwargs):
+        super(PBATransformerDecoderLayer, self).__init__()
+
+        message = "Choose one of available attentions: " + ", ".join(_AVAILABLE_ATTENTIONS)
+        assert attention in _AVAILABLE_ATTENTIONS, message
+
+        if attention == _AVAILABLE_ATTENTIONS[0]:
+            self.masked_attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout,
+                                                                  masked=True, **kwargs)
+            self.attention = MultiHeadHomogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        elif attention == _AVAILABLE_ATTENTIONS[1]:
+            self.masked_attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout,
+                                                                    masked=True, **kwargs)
+            self.attention = MultiHeadHeterogeneousAttention(dim_m, dim_proj, dropout=dropout, **kwargs)
+        else:
+            self.masked_attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, masked=True,
+                                                                  kind="decoder", **kwargs)
+            self.attention = MultiHeadInterleavedAttention(dim_m, dropout=dropout, kind="cross", **kwargs)
+
+        self.positionwise = PositionWise(dim_m, dim_i, dropout)
+
+    def forward(self, input: torch.Tensor, encoder_output: torch.Tensor) -> torch.Tensor:
+        dec_att = self.masked_attention(input, input, input)
         adj_att = self.attention(
             value=encoder_output, key=encoder_output, query=dec_att)
         output = self.positionwise(adj_att)

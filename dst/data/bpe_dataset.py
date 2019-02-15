@@ -1,59 +1,176 @@
 import errno
 import logging
 import os
-from functools import reduce
-from operator import and_
 from itertools import takewhile
 
 import numpy as np
-import sentencepiece
 import torch
 from gensim.models import Word2Vec
+from sentencepiece import SentencePieceProcessor, SentencePieceTrainer
 
 from .base_dataset import SummarizationDataset
-from dst.data.utils import SentenceIterator, export_embeddings
+from .utils import SentenceIterator, export_embeddings
+
+logger = logging.getLogger(__name__)
 
 
 class BPEDataset(SummarizationDataset):
-    def __init__(self, directory, prefix, part, max_sequence_length=150):
-        data_file_name = os.path.join(directory, prefix, part + ".npy")
-        spm_file_name = os.path.join(directory, prefix, "spm.model")
+    """Summarization dataset with Byte-Pair encoding.
 
-        self.directory = directory
-        self.prefix = prefix
-        self.part = part
-        self.__data = np.load(data_file_name)
-        self.spm = sentencepiece.SentencePieceProcessor()
-        self.spm.load(spm_file_name)
+    Args:
+        directory (str): Dataset directory.
+        prefix (str): Dataset preprocessing prefix.
+        part (str): Dataset part name. :attr:`directory` must contain :attr:`part`.tsv file.
+        max_sequence_length (int, optional): Defaults to 150. Maximum sequence length.
+
+    Note:
+        Use **kwargs to set up preprocessing arguments.
+    """
+
+    def __init__(self, directory: str, prefix: str, part: str, max_sequence_length=150, **kwargs):
+        self.data_workdir = os.path.join(directory, prefix)
+        self.source_part_file = os.path.join(directory, part + ".tsv")
+        self.part_file = os.path.join(self.data_workdir, part + ".npy")
+        self.spm_file = os.path.join(self.data_workdir, "spm.model")
+
+        if not self.exist(directory, prefix, part):
+            logger.info("Dataset part {}/{} not founded".format(self.data_workdir, part))
+            self.preprocess(directory, prefix, part, **kwargs)
+
+        self.data = np.load(self.part_file)
+
+        if "spm" in kwargs:
+            logger.info("Use existing spm model")
+            self.spm = kwargs["spm"]
+        else:
+            logger.info("Load spm model")
+            self.spm = SentencePieceProcessor()
+            self.spm.load(self.spm_file)
+
         self.pad_symbol = self.spm.pad_id()
         self.eos_symbol = self.spm.eos_id()
-        self.__len = self.__data.shape[0]
-        self.limit = max_sequence_length
+
+        self._len = self.data.shape[0]
 
         sequence_lens = [
-            len(seq) for example in self.__data for seq in example
+            len(seq) for example in self.data for seq in example
         ]
-        self.max_sequence_length = min(self.limit, max(sequence_lens))
+        self.max_sequence_length = min(max_sequence_length, max(sequence_lens))
 
     def __getitem__(self, index):
-        return self.__data[index]
+        return self.data[index]
 
     def __len__(self):
-        return self.__len
+        return self._len
 
-    def decode(self, sequences):
-        sequences = [list(takewhile(lambda x: x != self.eos_symbol, sequence)) for sequence in sequences]
-        return [self.spm.DecodeIds([token.item() for token in sentence])
-                for sentence in sequences]
+    @staticmethod
+    def exist(directory: str, prefix: str, part: str) -> bool:
+        """Check dataset existence,
 
-    def get_embeddings(self):
-        """Load pretrain embeddins.
+        Args:
+            directory (str): Dataset directory.
+            prefix (str): Dataset prefix.
+            part (str): Dataset part.
+            spm_filename (str, optional): Defaults to "spm.model". Name of sentencepiece serialized model.
 
+        Returns:
+            bool: Existence status.
+        """
+
+        data_workdir = os.path.join(directory, prefix)
+        part_filename = os.path.join(data_workdir, part + ".npy")
+        spm_filename = os.path.join(data_workdir, "spm.model")
+
+        necessary_files = [part_filename, spm_filename]
+        existing = [os.path.exists(filename) for filename in necessary_files]
+        return all(existing)
+
+    @staticmethod
+    def preprocess(directory: str,
+                   prefix: str,
+                   part: str,
+                   spm: SentencePieceProcessor = None,
+                   pretrain_emb=True,
+                   vocab_size=30000,
+                   embedding_size=300,
+                   max_sentence_length=16384,
+                   workers=3,
+                   skip_gramm=False):
+        """Preprocess dataset.
+
+        Args:
+            directory (str): Dataset directory.
+            prefix (str): Dataset preprocessing prefix.
+            part (str): Dataset part. :attr:`directory` must contain :attr:`part`.tsv file with data.
+            spm (SentencePieceProcessor, optional): Defaults to None. Sentecepiece model.
+            pretrain_emb (bool, optional): Defaults to True. Whether to pretrain embeddings.
+            vocab_size (int, optional): Defaults to 30000. Vocabulary size.
+            embedding_size (int, optional): Defaults to 300. Pretrained embedding size.
+            max_sentence_length (int, optional): Defaults to 16384. Maximum sentence length for sentencepiece.
+            workers (int, optional): Defaults to 3. Number of workers.
+            skip_gramm (bool, optional): Defaults to False. Whether to use skip-gram type of Word2Vec training.
+
+        Raises:
+            FileNotFoundError: Raises if source data file doesn't exist.
+        """
+
+        data_workdir = os.path.join(directory, prefix)
+        part_source_filename = os.path.join(directory, part + ".tsv")
+        part_exported_filename = os.path.join(data_workdir, part + ".npy")
+        spm_filename = os.path.join(data_workdir, "spm.model")
+        spm_directory = os.path.join(data_workdir, "spm")
+        w2v_model_filename = os.path.join(data_workdir, "word2vec.model")
+        embeddings_filename = os.path.join(data_workdir, "embedding.npy")
+
+        logger.info("Preprocess {}/{} dataset.".format(data_workdir, part))
+        os.makedirs(data_workdir, exist_ok=True)
+
+        if not os.path.exists(part_source_filename):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), part_source_filename)
+
+        if part not in ["train", "dev"]:
+            assert spm is not None, "For non train part, `spm` must be specified."
+        else:
+            logger.info("Start training sentencepiece")
+            spm_params = (
+                "--pad_id=0 --unk_id=1 --bos_id=2 --eos_id=3 "
+                "--input={} --model_prefix={} --vocab_size={} --max_sentence_length={}".format(
+                    part_source_filename,
+                    spm_directory,
+                    vocab_size,
+                    max_sentence_length
+                )
+            )
+            SentencePieceTrainer.Train(spm_params)
+            spm = SentencePieceProcessor()
+            spm.load(spm_filename)
+
+            if pretrain_emb:
+                logger.info("Start training Word2Vec embeddings")
+
+                train_senteces = SentenceIterator(part_source_filename, spm)
+                logger.info("Loaded train sentences")
+                w2v_model = Word2Vec(train_senteces, min_count=0, workers=workers,
+                                     size=embedding_size, sg=int(skip_gramm))
+                w2v_model.save(w2v_model_filename)
+
+                # Export embeddings
+                logger.info("Export embeddings")
+                export_embeddings(embeddings_filename, spm, w2v_model)
+                logger.info("Embeddings have been saved into {}".format(embeddings_filename))
+
+        logger.info("Start exporting data file")
+        sentence_iterator = SentenceIterator(part_source_filename, spm)
+        sentence_iterator.export(part_exported_filename)
+        logger.info("{} exported".format(part_exported_filename))
+
+    def get_embeddings(self) -> np.array:
+        """Load pretrain embeddings.
         Returns:
             np.array: Array with word2vec embeddings if this one exists, otherwise `None`.
         """
 
-        embedinds_path = os.path.join(self.directory, self.prefix, "embedding.npy")
+        embedinds_path = os.path.join(self.data_workdir, "embedding.npy")
         if not os.path.exists(embedinds_path):
             logging.info("Embedding file does not founded")
             return None
@@ -61,44 +178,19 @@ class BPEDataset(SummarizationDataset):
             logging.info("Loading embedding dump file")
             return np.load(embedinds_path)
 
-    def encode(self, sequences):
-        raise NotImplementedError
+    def get_spm(self) -> SentencePieceProcessor:
+        return self.spm
 
-    @staticmethod
-    def exist(directory, prefix, parts):
-        """Check dataset dump existence.
-
-        Args:
-            directory (str): Dataset directory.
-            prefix (str): Dataset preprocess prefix.
-            parts (list): Dataset parts.
-
-        Returns:
-            bool: True if all dump files existed.
-        """
-        if isinstance(parts, str):
-            parts = [parts]
-        parts_file_name = [os.path.join(directory, prefix, part + ".npy") for part in parts]
-        smp_file_name = os.path.join(directory, prefix, "spm.model")
-
-        necessary_files = parts_file_name + [smp_file_name]
-        existing = [os.path.exists(filename) for filename in necessary_files]
-        return reduce(and_, existing)
-
-    @staticmethod
-    def __pad_sequence(sequences, pad_symbol=0):
-        sequence_lengths = [len(sequence) for sequence in sequences]
-        max_len = max(sequence_lengths)
-        for i, length in enumerate(sequence_lengths):
-            to_add = max_len - length
-            sequences[i] += [pad_symbol] * to_add
-        return sequences, sequence_lengths
+    def decode(self, sequences):
+        sequences = [list(takewhile(lambda x: x != self.eos_symbol, sequence)) for sequence in sequences]
+        return [self.spm.DecodeIds([token.item() for token in sentence])
+                for sentence in sequences]
 
     def collate_function(self, batch):
-        src_list, src_length_list = BPEDataset.__pad_sequence(
-            [example[0][:self.limit] for example in batch], self.pad_symbol)
-        trg_list, trg_length_list = BPEDataset.__pad_sequence(
-            [example[1][:self.limit] for example in batch], self.pad_symbol)
+        src_list, src_length_list = self._pad_sequence(
+            [example[0][:self.max_sequence_length] for example in batch], self.pad_symbol)
+        trg_list, trg_length_list = self._pad_sequence(
+            [example[1][:self.max_sequence_length] for example in batch], self.pad_symbol)
         batch = {
             "src": torch.LongTensor(src_list),
             "trg": torch.LongTensor(trg_list),
@@ -108,80 +200,10 @@ class BPEDataset(SummarizationDataset):
         return batch
 
     @staticmethod
-    def preprocess(directory, prefix, parts: list, max_sequence_length=150,
-                   pretrain_emb=True, vocab_size=3000, embedding_size=600,
-                   max_sentence_length=16384, workers=3, skip_gramm=False):
-        """Preprocess dataset.
-
-        Args:
-            directory (str): Dataset directory, containing .tsv parts.
-            prefix (str): Dataset preprocessing prefix.
-            parts (list): Parts of dataset.
-            pretrain_emb (bool, optional): Defaults to True. Whether to use pretrained embeddings.
-            vocab_size (int, optional): Defaults to 3000. Vocabulary size.
-            embedding_size (int, optional): Defaults to 600. Embedding size.
-            max_sentence_length (int, optional): Defaults to 16384. Sentecepiece max seq length
-            workers (int, optional): Defaults to 3. Number of workers.
-            skip_gramm (bool, optional): Defaults to False. Whether to use skip-gram word2vec.
-
-        Raises:
-            LookupError: Parts must contain `train`. Otherwise exception raised.
-            FileNotFoundError: Raises if can not find dataset files.
-
-        Returns:
-            tuple: Tuple of BPEDataset for each dataset part respectively.
-        """
-
-        if 'train' not in parts:
-            raise LookupError("There is not `train` part of dataset. Can not train sentencepiece and word2vec")
-
-        # Check data files existing
-        train_part_file = os.path.join(directory, "train.tsv")
-        workdir = os.path.join(directory, prefix)
-        data_part_files = [os.path.join(directory, part + ".tsv") for part in parts]
-        for part_file in data_part_files:
-            if not os.path.exists(part_file):
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), part_file)
-
-        # Create folder
-        os.makedirs(workdir, exist_ok=True)
-
-        # Train sentecepiece:
-        logging.info("Start training sentecepiece")
-        spm_directory = os.path.join(workdir, "spm")
-        spm_params = (
-            "--pad_id=0 --unk_id=1 --bos_id=2 --eos_id=3 "
-            "--input={} --model_prefix={} --vocab_size={} --max_sentence_length={}".format(
-                train_part_file, spm_directory, vocab_size, max_sentence_length
-            )
-        )
-        sentencepiece.SentencePieceTrainer.Train(spm_params)
-        spm = sentencepiece.SentencePieceProcessor()
-        spm.load(spm_directory + ".model")
-
-        if pretrain_emb:
-            # Train word2vec
-            logging.info("Start training word2vec")
-            train_senteces = SentenceIterator(train_part_file, spm)
-            logging.info("Loaded train senteces")
-            w2v_model = Word2Vec(train_senteces, min_count=0, workers=workers, size=embedding_size, sg=int(skip_gramm))
-            w2v_model_filename = os.path.join(workdir, "word2vec.model")
-            w2v_model.save(w2v_model_filename)
-
-            # Export embeddings
-            logging.info("Export embeddings")
-            embeddings_filename = os.path.join(workdir, "embedding.npy")
-            export_embeddings(embeddings_filename, spm, w2v_model)
-            logging.info("Embeddings have been saved into {}".format(embeddings_filename))
-
-        logging.info("Start exporting data files")
-        for part in parts:
-            # Export each part of dataset into `part.npy`
-            source_file_name = os.path.join(directory, part + ".tsv")
-            exported_file_name = os.path.join(workdir, part + ".npy")
-            sentence_iterator = SentenceIterator(source_file_name, spm)
-            sentence_iterator.export(exported_file_name)
-            logging.info("{} exported".format(exported_file_name))
-        logging.info("Data preprocessing completed")
-
-        return tuple(BPEDataset(directory, prefix, part, max_sequence_length) for part in parts)
+    def _pad_sequence(sequences, pad_symbol=0):
+        sequence_lengths = [len(sequence) for sequence in sequences]
+        max_len = max(sequence_lengths)
+        for i, length in enumerate(sequence_lengths):
+            to_add = max_len - length
+            sequences[i] += [pad_symbol] * to_add
+        return sequences, sequence_lengths
