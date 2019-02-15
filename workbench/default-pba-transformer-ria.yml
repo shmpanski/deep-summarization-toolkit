@@ -1,9 +1,16 @@
 # Example of training/evaluating configs.
 # Model used:
-model: ConvTransformer
+model: PBATransformer
 
 # Model's arguments. Empty to use default arguments.
-margs: {}
+margs:
+  num_layers: 6
+  emb_size: 300
+  dim_m: 512
+  dim_i: 2048
+  n_heads: 8
+  head_convs: [1, 2]
+
 
 # Dataset used:
 dataset: RIADataset
@@ -37,7 +44,7 @@ oargs:
 # Training arguments:
 targs:
   # Prefix of running model configuration:
-  prefix: conv-transformer-ria
+  prefix: pba-transformer-ria
   # Used device
   device: cuda
   epochs: 5

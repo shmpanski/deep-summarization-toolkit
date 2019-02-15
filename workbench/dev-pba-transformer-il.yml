@@ -42,7 +42,7 @@ oargs:
 # Training arguments:
 targs:
   # Prefix of running model configuration:
-  prefix: test-pba-transformer
+  prefix: dev-pba-transformer-il
   # Used device
   device: cuda
   epochs: 5
