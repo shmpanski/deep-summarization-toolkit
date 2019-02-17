@@ -14,16 +14,29 @@ class BeamSearch:
     def __init__(self, k: int, device='cpu'):
         self.k = k
         self.device = device
-        self.scores = torch.zeros(k, 1, device=device)
-        self.sequences = [[]] * k
+        self.scores = None
+        self.sequences = None
+
+    def initial_update(self, probs: torch.FloatTensor):
+        scores = -torch.log(probs)
+        top_scores, top_tokens = scores.topk(self.k)
+        self.sequences = [[token] for token in top_tokens]
+        self.scores = top_scores.view(self.k, 1)
 
     def update(self, probs: torch.FloatTensor):
         """Update beam.
 
         Args:
             probs (torch.FloatTensor): Probability distribution of vocabulary for each beam
-              of shape ``(k, vocab_size)``.
+              of shape ``(k, vocab_size)``. For initial update shape must be ``(vocab_size, )``.
         """
+        if self.scores is None:
+            assert len(probs.shape) == 1, "Initial update must be done with single-beam prob distribution"
+            self.initial_update(probs)
+            return
+        else:
+            assert len(probs.shape) == 2, "Update probs must be a matrix of sizes ``(k, vocab)``"
+            assert probs.shape[0] == self.k, "Update must be done with k-beam prob distribution"
 
         probs_scores = self.scores - torch.log(probs)
         top_k_scores, top_k_tokens = probs_scores.topk(self.k)
@@ -41,12 +54,10 @@ class BeamSearch:
         self.scores = top_scores.view(self.k, 1)
 
     def search(self) -> torch.LongTensor:
-        """Find best sequence.
+        """Find best ``k`` sequence.
 
         Returns:
-            torch.LongTensor: Decoded sequence.
+            torch.LongTensor: Decoded sequences.
         """
 
-        idx = self.scores.view(-1).argmax()
-        sequence = self.sequences[idx]
-        return torch.LongTensor(sequence, device=self.device)
+        return torch.LongTensor(self.sequences, device=self.device)

@@ -10,9 +10,9 @@ class TestBeamSearchMethods(unittest.TestCase):
         self.k = 5
         self.beam_search = BeamSearch(self.k)
 
-    def test_update(self):
+    def test_initial_update(self):
         vocab = 100
-        output = torch.randn(self.k, vocab).softmax(-1)
+        output = torch.randn(vocab).softmax(-1)
         self.beam_search.update(output)
 
         score_shape = self.beam_search.scores.shape
@@ -25,8 +25,11 @@ class TestBeamSearchMethods(unittest.TestCase):
         vocab = 100
         length = 10
 
-        for _ in range(length):
-            output = torch.randn(self.k, vocab).softmax(-1)
+        for t in range(length):
+            if t == 0:
+                output = torch.randn(vocab).softmax(-1)
+            else:
+                output = torch.randn(self.k, vocab).softmax(-1)
             self.beam_search.update(output)
 
         score_shape = self.beam_search.scores.shape
@@ -39,9 +42,12 @@ class TestBeamSearchMethods(unittest.TestCase):
         vocab = 100
         length = 10
 
-        for _ in range(length):
-            output = torch.rand(self.k, vocab).softmax(-1)
+        for t in range(length):
+            if t == 0:
+                output = torch.randn(vocab).softmax(-1)
+            else:
+                output = torch.randn(self.k, vocab).softmax(-1)
             self.beam_search.update(output)
         sequence = self.beam_search.search()
 
-        self.assertTupleEqual(sequence.shape, (length, ))
+        self.assertTupleEqual(sequence.shape, (self.k, length))
