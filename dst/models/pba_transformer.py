@@ -79,7 +79,7 @@ class PBATransformer(BaseSummarizationModel):
         output = self.out(decoder_state)
         return output
 
-    def inference(self, source: torch.Tensor, limit: int, beam_size=1) -> Tuple[torch.Tensor, torch.Tensor]:
+    def inference(self, source: torch.Tensor, limit: int, beam_size=5) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_size = source.shape[0]
 
         encoder_state = self.embedding(source)
@@ -120,6 +120,7 @@ class PBATransformer(BaseSummarizationModel):
 
             # (batch, beam, t)
             generated_seq = torch.stack(generated_seq_list)
+            torch.cuda.empty_cache()
 
         generated_seq = generated_seq[:, 0, 1:].contiguous()
         output_distr = candidate_distributions[:, 0].contiguous()
