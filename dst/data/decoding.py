@@ -18,7 +18,7 @@ class BeamSearch:
         self.sequences = None
 
     def initial_update(self, probs: torch.FloatTensor):
-        scores = -torch.log(probs)
+        scores = torch.log(probs)
         top_scores, top_tokens = scores.topk(self.k)
         self.sequences = [[token.item()] for token in top_tokens]
         self.scores = top_scores.view(self.k, 1)
@@ -38,7 +38,7 @@ class BeamSearch:
             assert len(probs.shape) == 2, "Update probs must be a matrix of sizes ``(k, vocab)``"
             assert probs.shape[0] == self.k, "Update must be done with k-beam prob distribution"
 
-        probs_scores = self.scores - torch.log(probs)
+        probs_scores = self.scores + torch.log(probs)
         probs_scores = probs_scores.detach().cpu()
         top_k_scores, top_k_tokens = probs_scores.topk(self.k)
         top_k_seq_idx = torch.arange(self.k).view(self.k, 1).repeat(1, self.k)
