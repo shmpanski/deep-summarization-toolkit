@@ -36,8 +36,10 @@ class RIADataset(BPEDataset):
                  dev=False,
                  seed=42,
                  parts=None,
+                 rm_strongs=True,
                  **kwargs):
         self.directory = directory
+        self.rm_strongs = rm_strongs
 
         if dev and part == "train":
             part = "dev"
@@ -82,7 +84,7 @@ class RIADataset(BPEDataset):
                 for i, line in tqdm(enumerate(out_f), total=total_size, desc="Exporting dataset"):
                     data = json.loads(line)
                     title, text = data['title'], data['text']
-                    text = self.clear_text(text)
+                    text = self.clear_text(text, self.rm_strongs)
                     text = " ".join(split_into_sentences(text)[:n_sentences])
 
                     drop = False
@@ -143,13 +145,14 @@ class RIADataset(BPEDataset):
         return total
 
     @staticmethod
-    def clear_text(text: str) -> str:
+    def clear_text(text: str, rm_strong=True) -> str:
         selector = "strong"
         text = unicodedata.normalize("NFKD", text)
         text = text.replace("\n", " ")
         tree = HTMLParser(text)
-        for node in tree.css(selector):
-            node.decompose()
+        if rm_strong:
+            for node in tree.css(selector):
+                node.decompose()
         return tree.text().strip()
 
     @staticmethod
