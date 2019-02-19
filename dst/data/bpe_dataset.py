@@ -21,6 +21,7 @@ class BPEDataset(SummarizationDataset):
         directory (str): Dataset directory.
         prefix (str): Dataset preprocessing prefix.
         part (str): Dataset part name. :attr:`directory` must contain :attr:`part`.tsv file.
+          Use `None` for sampling.
         max_sequence_length (int, optional): Defaults to 150. Maximum sequence length.
 
     Note:
@@ -29,9 +30,14 @@ class BPEDataset(SummarizationDataset):
 
     def __init__(self, directory: str, prefix: str, part: str, max_sequence_length=150, **kwargs):
         self.data_workdir = os.path.join(directory, prefix)
+        self.spm_file = os.path.join(self.data_workdir, "spm.model")
+
+        if part is None:
+            self._sample_init(self.spm_file, max_sequence_length)
+            return
+
         self.source_part_file = os.path.join(directory, part + ".tsv")
         self.part_file = os.path.join(self.data_workdir, part + ".npy")
-        self.spm_file = os.path.join(self.data_workdir, "spm.model")
 
         if not self.exist(directory, prefix, part):
             logger.info("Dataset part {}/{} not founded".format(self.data_workdir, part))
@@ -56,6 +62,21 @@ class BPEDataset(SummarizationDataset):
             len(seq) for example in self.data for seq in example
         ]
         self.max_sequence_length = min(max_sequence_length, max(sequence_lens))
+
+    def _sample_init(self, spm_file_name, max_sequence_length):
+        if not os.path.exists(spm_file_name):
+            raise RuntimeError("Firstly preprocess dataset")
+
+        self.spm = SentencePieceProcessor()
+        self.spm.load(spm_file_name)
+
+        self.pad_symbol = self.spm.pad_id()
+        self.eos_symbol = self.spm.eos_id()
+
+        self._len = 0
+        self.data = []
+
+        self.max_sequence_length = max_sequence_length
 
     def __getitem__(self, index):
         return self.data[index]
@@ -180,6 +201,10 @@ class BPEDataset(SummarizationDataset):
 
     def get_spm(self) -> SentencePieceProcessor:
         return self.spm
+
+    def encode(self, sequences):
+        sequences = [self.spm.EncodeAsIds(s) for s in sequences]
+        return torch.LongTensor(sequences)
 
     def decode(self, sequences):
         sequences = [list(takewhile(lambda x: x != self.eos_symbol, sequence)) for sequence in sequences]

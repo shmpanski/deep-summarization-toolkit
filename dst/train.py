@@ -38,6 +38,7 @@ class Trainer:
         self.optimizer_name = self.config["optimizer"]
         self.oargs = self.config["oargs"]
         self.targs = self.config["targs"]
+        self.eargs = self.config.get("eargs", dict())
         self.dump_directory = os.path.join(WORKBENCH_DIR, self.targs["prefix"])
         self.tensorboard_log_dir = os.path.join(WORKBENCH_DIR, "logs", self.targs["prefix"])
         logging.info("Configuration for `%s` and `%s` dataset with launch prefix `%s` have been loaded",
@@ -151,7 +152,7 @@ class Trainer:
         best_model_to_save = {"best_model": self.model}
 
         # Create evaluator engine
-        evaluator = self.model.create_evaluator(self.device)
+        evaluator = self.model.create_evaluator(self.device, **self.eargs)
         val_loader = DataLoader(self.test_dataset,
                                 self.targs.get("test_batch_size", 8),
                                 shuffle=True,
