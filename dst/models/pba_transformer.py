@@ -120,7 +120,9 @@ class PBATransformer(BaseSummarizationModel):
 
             # (batch, beam, t)
             generated_seq = torch.stack(generated_seq_list)
-            torch.cuda.empty_cache()
+
+            if source.device.type != 'cpu':
+                torch.cuda.empty_cache()
 
         generated_seq = generated_seq[:, 0, 1:].contiguous()
         output_distr = candidate_distributions[:, 0].contiguous()
