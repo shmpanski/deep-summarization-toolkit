@@ -103,9 +103,9 @@ class RIADataset(BPEDataset):
                         train_writer.writerow([text, title])
                     elif i == test_idx[test_index_cursor]:
                         test_index_cursor += 1
-                        test_writer.writerow([text, title])
                         if drop:
                             continue
+                        test_writer.writerow([text, title])
                     else:
                         raise RuntimeError()
 
