@@ -1,0 +1,42 @@
+model: SummarizationRNN
+
+margs:
+  num_layers: 6
+
+dataset: RIADataset
+dargs:
+  init:
+    directory: ./datasets/ria-20
+    prefix: ria-300-sg
+    max_sequence_length: 150
+    parts:
+      train: -1
+      test: 20000
+      dev: 5000
+    n_sentences: 3
+    rm_strongs: True
+  preprocess:
+    pretrain_emb: True
+    vocab_size: 30000
+    embedding_size: 300
+    # Max sequence length for sentecepiece processor
+    max_sentence_length: 16384
+    workers: 3
+    # Whether to use skip-gram for training word2vec
+    skip_gramm: True
+
+optimizer: Adam
+oargs:
+  lr: 1.0e-4
+  amsgrad: True
+  betas: [0.9, 0.98]
+  eps: 1.0e-9
+
+targs:
+  prefix: ria-20-rnn
+  device: cuda
+  epochs: 10
+  train_batch_size: 16
+  test_batch_size: 16
+  checkpoint_interval: 1000
+  train_log_interval: 100
