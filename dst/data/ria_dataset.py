@@ -75,6 +75,8 @@ class RIADataset(BPEDataset):
             test_filename = os.path.join(self.directory, "test.tsv")
             dev_filename = os.path.join(self.directory, "dev.tsv")
 
+            os.makedirs(self.directory, exist_ok=True)
+
             with open(train_filename, "w", newline='') as train_file, open(test_filename, "w", newline='') as test_file:
                 train_index_cursor, test_index_cursor = 0, 0
                 train_writer = writer(train_file, delimiter="\t")
