@@ -97,7 +97,6 @@ class SummarizationTransformer(BaseSummarizationModel):
             candidate_distributions_list = []
             for candidate_seq in candidate_seqs:
                 # TODO: fix this shit code.
-                self.transformer.reset_encoder_state()
                 candidate_out_distr = self.transformer(source, candidate_seq)
                 candidate_out_distr = candidate_out_distr.softmax(-1)
                 candidate_distributions_list.append(candidate_out_distr)
