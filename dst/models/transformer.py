@@ -92,6 +92,7 @@ class SummarizationTransformer(BaseSummarizationModel):
         for beam in batch_beams:
             beam.update(initial_distribution)
 
+        self.transformer.reset_encoder_state()
         for _ in range(limit):
             candidate_seqs = generated_seq.transpose(0, 1)
             candidate_distributions_list = []
