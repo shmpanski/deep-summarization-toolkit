@@ -35,14 +35,14 @@ class TestSummarizationRNNMethods(unittest.TestCase):
         self.assertTupleEqual(att_distr.shape, (3, 4, 5))
 
     def test_model_inference(self):
-        seq_distr, seq = self.model.inference(self.input_seq, self.output_seq.shape[1], self.input_seq_length)
-        self.assertTupleEqual(seq_distr.shape, (3, 3, 100))
-        self.assertTupleEqual(seq.shape, (3, 3))
+        seq, seq_distr = self.model.inference(self.input_seq, self.output_seq.shape[1], self.input_seq_length)
+        self.assertTupleEqual(seq_distr.shape, (3, 4, 100))
+        self.assertTupleEqual(seq.shape, (3, 4))
 
     def test_model_inference_without_seq_lengths(self):
-        seq_distr, seq = self.model.inference(self.input_seq, self.output_seq.shape[1])
-        self.assertTupleEqual(seq_distr.shape, (3, 3, 100))
-        self.assertTupleEqual(seq.shape, (3, 3))
+        seq, seq_distr = self.model.inference(self.input_seq, self.output_seq.shape[1])
+        self.assertTupleEqual(seq_distr.shape, (3, 4, 100))
+        self.assertTupleEqual(seq.shape, (3, 4))
 
     def test_model_create_trainer(self):
         trainer = self.model.create_trainer(self.optimizer, self.device)

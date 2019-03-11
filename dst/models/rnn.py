@@ -2,6 +2,7 @@ import torch
 from ignite.engine import Engine
 from torch import nn
 
+from dst.data.decoding import BeamSearch
 from dst.nn import RNNDecoder, RNNEncoder
 
 from .base_model import BaseSummarizationModel
@@ -84,7 +85,7 @@ class SummarizationRNN(BaseSummarizationModel):
         output_vocab_distr = self.out_to_vocab(decoder_output)
         return output_vocab_distr[:, :-1, :].contiguous(), attention_distr
 
-    def inference(self, source, limit, source_lengths=None):
+    def inference(self, source, limit, source_lengths=None, beam_size=5):
         """Inference sequences using model.
 
         Args:
@@ -104,28 +105,41 @@ class SummarizationRNN(BaseSummarizationModel):
         source_embedded = self.embeddings(source)
         encoder_state, h_e = self.encoder(source_embedded, source_lengths)
 
-        # Create initial tokens.
-        initial_tokens = torch.full((batch_size, 1),
-                                    self.initial_token_idx,
-                                    dtype=torch.long,
-                                    device=source.device)
-        generated_seq = [initial_tokens]
-        # It's better to add initial token distribtion, but I'm too lazy.
-        generated_distr = []
+        initial_distribution = torch.zeros(self.vocab_size, device=source.device)
+        initial_distribution[self.initial_token_idx] = 1.0
+        generated_seq = torch.full((batch_size, beam_size, 1),
+                                   self.initial_token_idx,
+                                   dtype=torch.long,
+                                   device=source.device)
 
-        for i in range(0, limit - 1):
-            generated_embedded = self.embeddings(generated_seq[i])
-            output_decoder, h_e, _ = self.decoder(generated_embedded, encoder_state, h_e)
-            output = self.out_to_vocab(output_decoder)
-            generated_token_idx = output.argmax(dim=-1)
+        batch_beams = [BeamSearch(beam_size, source.device) for _ in range(batch_size)]
+        for beam in batch_beams:
+            beam.update(initial_distribution)
 
-            # Concatenate generated token with sequence.
-            generated_seq.append(generated_token_idx)
-            generated_distr.append(output)
+        for _ in range(limit):
+            candidate_seqs = generated_seq.transpose(0, 1)
+            candidate_distributions_list = []
+            for candidate_seq in candidate_seqs:
+                decoder_embedding = self.embeddings(candidate_seq)
+                decoder_state, _, _ = self.decoder(decoder_embedding, encoder_state, h_e)
+                candidate_out_distr = self.out_to_vocab(decoder_state).softmax(-1)
+                candidate_distributions_list.append(candidate_out_distr)
+            candidate_distributions = torch.stack(candidate_distributions_list, 1)
 
-        generated_seq_probs = torch.cat(generated_distr, dim=1)
-        generated_seq = torch.cat(generated_seq[1:], dim=1)
-        return generated_seq_probs, generated_seq
+            generated_seq_list = []
+            for batch_id, beam in enumerate(batch_beams):
+                beam.update(candidate_distributions[batch_id, :, -1])
+                generated_seq_list.append(beam.search())
+
+            # (batch, beam, t)
+            generated_seq = torch.stack(generated_seq_list)
+
+            if source.device.type != 'cpu':
+                torch.cuda.empty_cache()
+
+        generated_seq = generated_seq[:, 0, 1:].contiguous()
+        output_distr = candidate_distributions[:, 0].contiguous()
+        return generated_seq, output_distr
 
     def create_trainer(self, optimizer, device):
         """Create :class:`ignite.engine.Engine` trainer.
@@ -152,7 +166,7 @@ class SummarizationRNN(BaseSummarizationModel):
             return loss.item()
         return Engine(_update)
 
-    def create_evaluator(self, device):
+    def create_evaluator(self, device, **kwargs):
         """Create :class:`ignite.engine.Engine` evaluator.
 
         Args:
@@ -167,7 +181,7 @@ class SummarizationRNN(BaseSummarizationModel):
             batch["trg"] = batch["trg"].to(device)
 
             self.eval()
-            __, generated = self.inference(batch["src"], batch["trg"].shape[1])
+            generated, _ = self.inference(batch["src"], batch["trg"].shape[1] - 1, **kwargs)
 
             return generated, batch["trg"][:, 1:]
         return Engine(_evaluate)
