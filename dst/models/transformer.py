@@ -2,6 +2,7 @@ import torch
 from ignite.engine import Engine
 from torch import nn
 
+from dst.data.decoding import BeamSearch
 from dst.nn.modules import Transformer
 
 from .base_model import BaseSummarizationModel
@@ -77,30 +78,46 @@ class SummarizationTransformer(BaseSummarizationModel):
         shifted = torch.cat((stacked_probs, output[:, :-1, :]), dim=1)
         return shifted, shifted.argmax(-1)
 
-    def inference(self, source, limit):
+    def inference(self, source, limit, beam_size=5):
         batch_size = source.shape[0]
-        # Create initial tokens.
-        generated_seq = torch.full((batch_size, 1),
+
+        initial_distribution = torch.zeros(self.vocab_size, device=source.device)
+        initial_distribution[self.initial_token_idx] = 1.0
+        generated_seq = torch.full((batch_size, beam_size, 1),
                                    self.initial_token_idx,
                                    dtype=torch.long,
                                    device=source.device)
 
-        # It's very important to do this before every train batch cycle.
-        self.transformer.reset_encoder_state()
-        for __ in range(1, limit):
-            # output = self.transformer(source_inp_seq, generated_inp_seq)
-            output = self.transformer(source, generated_seq)
+        batch_beams = [BeamSearch(beam_size, source.device) for _ in range(batch_size)]
+        for beam in batch_beams:
+            beam.update(initial_distribution)
 
-            # Take last token probabilities and find it's index.
-            generated_token_idx = output[:, -1, :].argmax(dim=-1).unsqueeze(1)
+        for _ in range(limit):
+            candidate_seqs = generated_seq.transpose(0, 1)
+            candidate_distributions_list = []
+            for candidate_seq in candidate_seqs:
+                # TODO: fix this shit code.
+                self.transformer.reset_encoder_state()
+                candidate_out_distr = self.transformer(source, candidate_seq)
+                candidate_out_distr = candidate_out_distr.softmax(-1)
+                candidate_distributions_list.append(candidate_out_distr)
+            # (batch, beam, t, vocab_size)
+            candidate_distributions = torch.stack(candidate_distributions_list, 1)
 
-            # Concatenate generated token with sequence.
-            generated_seq = torch.cat((generated_seq, generated_token_idx),
-                                      dim=-1)
+            generated_seq_list = []
+            for batch_id, beam in enumerate(batch_beams):
+                beam.update(candidate_distributions[batch_id, :, -1])
+                generated_seq_list.append(beam.search())
 
-        stacked_probs = self.initial_probs.to(source.device).repeat(batch_size, 1, 1)
-        generated_seq_probs = torch.cat((stacked_probs, output), dim=1)
-        return generated_seq_probs, generated_seq
+            # (batch, beam, t)
+            generated_seq = torch.stack(generated_seq_list)
+
+            if source.device.type != 'cpu':
+                torch.cuda.empty_cache()
+
+        generated_seq = generated_seq[:, 0, 1:].contiguous()
+        output_distr = candidate_distributions[:, 0].contiguous()
+        return generated_seq, output_distr
 
     @staticmethod
     def get_initial_probs(vocab_size, initial_token_idx):
@@ -144,14 +161,14 @@ class SummarizationTransformer(BaseSummarizationModel):
             return loss.item()
         return Engine(_update)
 
-    def create_evaluator(self, device):
+    def create_evaluator(self, device, **kwargs):
         def _evaluate(engine, batch):
             # Prepare batches
             batch["src"] = batch["src"].to(device)
             batch["trg"] = batch["trg"].to(device)
 
             self.eval()
-            __, generated = self.inference(batch["src"], batch["trg"].shape[1])
+            generated, _ = self.inference(batch["src"], batch["trg"].shape[1] - 1, **kwargs)
 
             return generated, batch["trg"]
         return Engine(_evaluate)

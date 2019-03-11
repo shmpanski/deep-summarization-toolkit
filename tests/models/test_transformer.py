@@ -31,6 +31,6 @@ class TestSummarizationTransformerMethods(unittest.TestCase):
 
     def test_model_inference(self):
         limit = self.output_seq.shape[1]
-        seq_distr, seq = self.model.inference(self.input_seq, limit)
+        seq, seq_distr = self.model.inference(self.input_seq, limit)
         self.assertEqual(seq_distr.shape, (3, 4, 100))
         self.assertEqual(seq.shape, self.output_seq.shape)
