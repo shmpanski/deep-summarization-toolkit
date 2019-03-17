@@ -1,0 +1,182 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "description": "Model run configuration",
+    "type": "object",
+    "properties": {
+        "prefix": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Training run name. This name is used as name of dump folder."
+        },
+        "model": {
+            "type": "object",
+            "description": "Model configuration",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Model class name",
+                    "examples": [
+                        "Transformer",
+                        "PBATransformer",
+                        "RNN"
+                    ]
+                },
+                "args": {
+                    "type": "object",
+                    "description": "Initialization model arguments"
+                }
+            },
+            "required": [
+                "name"
+            ]
+        },
+        "dataset": {
+            "type": "object",
+            "description": "Dataset configuration",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Dataset class name",
+                    "examples": [
+                        "BPEDataset",
+                        "RIADataset"
+                    ]
+                },
+                "args": {
+                    "type": "object",
+                    "description": "Initialization dataset arguments",
+                    "required": [
+                        "init",
+                        "preprocess"
+                    ],
+                    "properties": {
+                        "init": {
+                            "type": "object",
+                            "description": "Arguments, passed to __init__ of the dataset instance. For more details see dataset docs",
+                            "properties": {
+                                "directory": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Dataset directory. Source of data should be hold in this directory.",
+                                    "default": "./datasets/"
+                                },
+                                "prefix": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "Dataset prefix. Prefix should differ for different preprocessing settings."
+                                }
+                            },
+                            "required": [
+                                "directory",
+                                "prefix"
+                            ]
+                        },
+                        "preprocess": {
+                            "type": "object",
+                            "description": "Arguments, passed into preprocessing dataset function"
+                        }
+                    }
+                }
+            },
+            "required": [
+                "name",
+                "args"
+            ]
+        },
+        "optimizer": {
+            "type": "object",
+            "description": "Optimizer settings",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optimizer name"
+                },
+                "args": {
+                    "type": "object",
+                    "description": "Optimizer arguments"
+                }
+            },
+            "required": [
+                "name"
+            ]
+        },
+        "training": {
+            "type": "object",
+            "description": "Trainig settings",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Trainer Name",
+                    "examples": [
+                        "SummarizationTrainer",
+                        "BaseTrainer"
+                    ]
+                },
+                "device": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Device name",
+                    "examples": [
+                        "cpu",
+                        "cuda"
+                    ]
+                },
+                "epochs": {
+                    "type": "integer",
+                    "description": "Number of training epoches",
+                    "minimum": 1,
+                    "default": 7
+                },
+                "batches": {
+                    "type": "object",
+                    "description": "Describes sizes of train and evaluaton batches",
+                    "properties": {
+                        "train_size": {
+                            "type": "integer",
+                            "description": "Training batch size",
+                            "minimum": 1,
+                            "default": 16
+                        },
+                        "eval_size": {
+                            "type": "integer",
+                            "description": "Validation batch size",
+                            "minimum": 1,
+                            "default": 32
+                        }
+                    }
+                },
+                "intervals": {
+                    "type": "object",
+                    "description": "Describes logging or checkpoint intervals",
+                    "properties": {
+                        "checkpoint": {
+                            "type": "integer",
+                            "description": "Checkpoint interval",
+                            "minimum": 1,
+                            "default": 1000
+                        },
+                        "log": {
+                            "type": "integer",
+                            "description": "Logging interval",
+                            "minimum": 1,
+                            "default": 100
+                        }
+                    }
+                }
+            },
+            "required": [
+                "name"
+            ]
+        }
+    },
+    "required": [
+        "prefix",
+        "model",
+        "dataset",
+        "optimizer",
+        "training"
+    ]
+}
