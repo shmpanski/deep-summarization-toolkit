@@ -1,1 +1,1 @@
-from .train import Trainer
+from .train import load_trainer
