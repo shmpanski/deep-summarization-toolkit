@@ -1,6 +1,8 @@
+import json
 import logging
 import os
 
+import jsonschema
 import tqdm
 import yaml
 
@@ -33,3 +35,31 @@ def setup_logging(
         logging.config.dictConfig(config)
     else:
         logging.basicConfig(level=default_level)
+
+
+def fill_dict_default_values(source: dict, default_dict: dict):
+    """Fill dictionary with default values.
+
+    Args:
+        source (dict): Source dictionary.
+        default_dict (dict): Default dictionary values.
+    """
+
+    for key in default_dict:
+        if isinstance(default_dict[key], dict):
+            fill_dict_default_values(source.setdefault(key, {}), default_dict[key])
+        else:
+            source.setdefault(key, default_dict[key])
+
+
+def validate_yaml(yaml_data: dict, schema_file: str):
+    """Validate yaml data with json schema file.
+
+    Args:
+        yaml_data (dict): YAML data.
+        schema_file (str): Schema file name.
+    """
+
+    with open(schema_file) as schema_file:
+        schema = json.load(schema_file)
+        jsonschema.validate(yaml_data, schema)
