@@ -78,7 +78,7 @@ class SummarizationTransformer(BaseSummarizationModel):
         shifted = torch.cat((stacked_probs, output[:, :-1, :]), dim=1)
         return shifted, shifted.argmax(-1)
 
-    def inference(self, source, limit, beam_size=5):
+    def inference(self, source, limit=15, beam_size=5):
         batch_size = source.shape[0]
 
         initial_distribution = torch.zeros(self.vocab_size, device=source.device)

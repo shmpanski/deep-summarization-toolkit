@@ -79,7 +79,7 @@ class PBATransformer(BaseSummarizationModel):
         output = self.out(decoder_state)
         return output
 
-    def inference(self, source: torch.Tensor, limit: int, beam_size=5) -> Tuple[torch.Tensor, torch.Tensor]:
+    def inference(self, source: torch.Tensor, limit=15, beam_size=5) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_size = source.shape[0]
 
         encoder_state = self.embedding(source)
