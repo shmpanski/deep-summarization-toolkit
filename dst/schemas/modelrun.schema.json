@@ -17,9 +17,9 @@
                     "minLength": 1,
                     "description": "Model class name",
                     "examples": [
-                        "Transformer",
+                        "SummarizationTransformer",
                         "PBATransformer",
-                        "RNN"
+                        "SummarizationRNN"
                     ]
                 },
                 "args": {
@@ -170,6 +170,24 @@
             "required": [
                 "name"
             ]
+        },
+        "evaluation": {
+            "type": "object",
+            "description": "Evaluation configuration",
+            "properties": {
+                "args": {
+                    "type": "object"
+                }
+            }
+        },
+        "sample": {
+            "type": "object",
+            "description": "Sampling configuration",
+            "properties": {
+                "args": {
+                    "type": "object"
+                }
+            }
         }
     },
     "required": [
