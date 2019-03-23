@@ -1,82 +1,232 @@
-"""Training tools.
+"""Pipelines descriptions.
 """
 
 import json
 import logging
 import os
-from typing import Dict, Iterable, Tuple
+from typing import Dict, List, Tuple
 
 import jsonschema
 import torch
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint
-from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
+from torch.utils.data import DataLoader
 
 from dst import data, models
+from dst.utils import fill_dict_default_values
 from dst.utils.metrics import RougeMetric
 
+# Use JSON schema for validation and typing of necessary fields.
 MODELRUN_SCHEMA = "dst/schemas/modelrun.schema.json"
 WORKBENCH_DIR = "workbench"
 logger = logging.getLogger(__name__)
 
 
-class SummarizationTrainer:
-    def __init__(self, config: Dict) -> None:
-        self.config = config
-        logger.info("Configuration %s has been loaded", config["prefix"])
+class SummarizationPipeline:
+    """Pipline for training, evaluating and sampling summarization models.
 
+    Args:
+        config (Dict): Pipeline configuration.
+            See schema-JSON and :attr:`DEFAULT_CONFIGURATION` for more details.
+        mode (str, optional): Defaults to "train". Running mode.
+            Available: `train`, `eval` and `sample`.
+
+    Raises:
+        ValueError: In way of using invalid running mode.
+
+    Notes:
+        You can use train, evaluate and sample methods only in certain modes.
+        Otherwise raise RuntimeError.
+
+    """
+
+    AVAIALABLE_MODES = ["train", "eval", "sample"]
+    # Use this dictionary config to describe default values.
+    DEFAULT_CONFIGURATION = {
+        "prefix": str(),
+        "model": {"name": str(), "args": dict()},
+        "dataset": {
+            "name": str(),
+            "args": {
+                "init": {"directory": str(), "prefix": str()},
+                "preprocess": dict(),
+            },
+        },
+        "optimizer": {"name": str(), "args": dict()},
+        "training": {
+            "name": str(),
+            "device": "cpu",
+            "epochs": 7,
+            "batches": {"train_size": 16, "eval_size": 32},
+            "intervals": {"checkpoint": 1000, "log": 100},
+        },
+        "evaluation": {"args": dict()},
+        "sample": {"args": dict()},
+    }
+
+    def __init__(self, config: Dict, mode="train", **kwargs):
+        if mode not in self.AVAIALABLE_MODES:
+            raise ValueError(
+                mode,
+                " is invalid. Pipeline supports only `train`, `eval` or `sample` mode.",
+            )
+
+        fill_dict_default_values(config, self.DEFAULT_CONFIGURATION)
+        self.mode = mode
+        self.config = config
         self.dump_directory = os.path.join(WORKBENCH_DIR, config["prefix"])
         self.tensorboard_directory = os.path.join(self.dump_directory, "tensorboard")
-        self.training = config.get("training", {})
-        self.evaluation = config.get("evaluation", {})
-
-        # Instantiate dataset, model and optimizer:
-        self.train_dataset, self.test_dataset = self.instantiate_datasets(
-            config["dataset"]
-        )
-        self.model, _ = self.instantiate_model(config["model"], self.train_dataset)
-        self.optimizer = self.instantiate_optimizer(
-            config["optimizer"], self.model.learnable_parameters()
-        )
-
-        self.device = self.load_device(config["training"], move_model=True)
+        self.datasets = {}
+        self.device = torch.device(config["training"]["device"])
+        self.model = None
+        self.model_args = {}
+        self.optimizer = None
         self.tensorboard = SummaryWriter(self.tensorboard_directory)
 
-    def run(self):
-        train_loader, test_loader = self.instantiate_dataloaders(self.training)
-        log_interval, checkpoint_interval = self.get_intervals(self.training)
+        self.ModelClass = getattr(models, config["model"]["name"])
+        self.OptimizerClass = getattr(torch.optim, config["optimizer"]["name"])
+        self.DatasetClass = getattr(data, config["dataset"]["name"])
 
-        # Describe training  pipeline
+        if torch.cuda.is_available() and config["training"]["device"] == "cpu":
+            logger.warning(
+                "Your machine has cuda device. Use it to speed up training and evaluation processes."
+            )
+
+        if mode == "train":
+            self._init_train(config)
+        else:
+            if "dump_file" not in kwargs:
+                raise ValueError("Missing `dump_file` argument")
+            if mode == "eval":
+                self._init_eval(config, kwargs["dump_file"])
+            else:
+                self._init_sample(config, kwargs["dump_file"])
+
+        self.model.to(self.device)
+
+    def _init_train(self, config):
+        # Prepare all required parameters:
+        dataset_init_args = config["dataset"]["args"]["init"]
+        dataset_preprocess_args = config["dataset"]["args"]["preprocess"]
+        model_args = config["model"]["args"]
+        optimizer_args = config["optimizer"]["args"]
+
+        # Load train and test dataset parts:
+        train_dataset = self.DatasetClass(
+            part="train", **dataset_init_args, **dataset_preprocess_args
+        )
+        test_dataset = self.DatasetClass(
+            part="test", **dataset_init_args, spm=train_dataset.get_spm()
+        )
+        self.datasets = {"train": train_dataset, "test": test_dataset}
+        logger.info(
+            "Dataset has been loaded. Train part size: %d; test part size: %d.",
+            len(train_dataset),
+            len(test_dataset),
+        )
+
+        # Instantiate model
+        self.model, self.model_args = self.ModelClass.create(train_dataset, model_args)
+        logger.info(
+            "Model %s has been instantiated. Total parameters count: %d; Initial arguments: %s",
+            self.ModelClass,
+            sum(p.numel() for p in self.model.learnable_parameters()),
+            self.model_args,
+        )
+
+        # Instantiate optimizer
+        self.optimizer = self.OptimizerClass(
+            self.model.learnable_parameters(), **optimizer_args
+        )
+        logger.info(
+            "Optimizer %s has been instantiated. Initial arguments: %s",
+            self.OptimizerClass,
+            optimizer_args,
+        )
+
+    def _init_eval(self, config: Dict, model_dump_filename: str):
+        dataset_init_args = config["dataset"]["args"]["init"]
+        model_args = config["model"]["args"]
+
+        # Load test dataset part:
+        test_dataset = self.DatasetClass(part="test", **dataset_init_args)
+        self.datasets = {"test": test_dataset}
+        logger.info("Dataset has been loaded. Test part size: %d.", len(test_dataset))
+
+        # Instantiate model
+        self.model, self.model_args = self.ModelClass.create(test_dataset, model_args)
+        logger.info(
+            "Model %s has been instantiated. Total parameters count: %d; Initial arguments: %s",
+            self.ModelClass,
+            sum(p.numel() for p in self.model.learnable_parameters()),
+            self.model_args,
+        )
+
+        # Load model state from checkpoint
+        checkpoint = torch.load(model_dump_filename)
+        self.model.load_state_dict(checkpoint)
+        logger.info("Model state dictionary loaded from %s", model_dump_filename)
+
+    def _init_sample(self, config: Dict, model_dump_filename: str):
+        dataset_init_args = config["dataset"]["args"]["init"]
+        model_args = config["model"]["args"]
+
+        sample_dataset = self.DatasetClass(part=None, **dataset_init_args)
+        self.datasets = {"sample": sample_dataset}
+        self.model, self.model_args = self.ModelClass.create(sample_dataset, model_args)
+        logger.info(
+            "Model %s has been instantiated. Total parameters count: %d; Initial arguments: %s",
+            self.ModelClass,
+            sum(p.numel() for p in self.model.learnable_parameters()),
+            self.model_args,
+        )
+
+        # Load model state from checkpoint
+        checkpoint = torch.load(model_dump_filename)
+        self.model.load_state_dict(checkpoint)
+        logger.info("Model state dictionary loaded from %s", model_dump_filename)
+
+    def train(self):
+        """Run train process.
+        """
+        if self.mode != "train":
+            raise RuntimeError("You cannot `train` in `%s` mode.", self.mode)
+
+        train_bs = self.config["training"]["batches"]["train_size"]
+        eval_bs = self.config["training"]["batches"]["eval_size"]
+        checkpoint_interval = self.config["training"]["intervals"]["checkpoint"]
+        log_interval = self.config["training"]["intervals"]["log"]
+        train_loader = self._get_dataloader(self.datasets["train"], train_bs)
+        eval_loader = self._get_dataloader(self.datasets["test"], eval_bs)
+
         trainer_engine = self.model.create_trainer(self.optimizer, self.device)
-        evaluate_engine = self.model.create_evaluator(
-            self.device, **self.evaluation.get("args", {})
-        )
+        evaluation_engine = self._evaluation_engine(log_tensorboard=True)
         trainer_saver = ModelCheckpoint(
-            self.dump_directory, "checkpoint", save_interval=checkpoint_interval
+            self.dump_directory + "/checkpoints",
+            "checkpoint",
+            save_interval=checkpoint_interval,
+            save_as_state_dict=True,
         )
-        checkpoint_objects = {"model": self.model, "optim": self.optimizer}
         best_state_saver = ModelCheckpoint(
-            self.dump_directory,
+            self.dump_directory + "/best_models",
             "best",
             score_name="rouge",
             score_function=lambda e: e.state.metrics["rouge"]["rouge-1"]["f"],
             n_saved=3,
+            save_as_state_dict=True,
         )
+        checkpoint_objects = {"model": self.model, "optim": self.optimizer}
+        best_model_objects = {"model": self.model}
 
-        self.attach_metrics(evaluate_engine)
-        self.attach_progress_bar(evaluate_engine, desc="Evaluation ")
-
-        # Attach event handlers
         trainer_engine.add_event_handler(
             Events.ITERATION_COMPLETED, trainer_saver, checkpoint_objects
         )
-        evaluate_engine.add_event_handler(
-            Events.COMPLETED, best_state_saver, {"model": self.model}
+        evaluation_engine.add_event_handler(
+            Events.COMPLETED, best_state_saver, best_model_objects
         )
 
-        # Log loss and process during training.
         @trainer_engine.on(Events.ITERATION_COMPLETED)
         def log_trainer(e: Engine):
             iteration = (e.state.iteration - 1) % len(train_loader) + 1
@@ -94,21 +244,17 @@ class SummarizationTrainer:
         def evaluate(e: Engine):
             logger.info("Start model evaluation.")
 
-            evaluate_engine.run(test_loader)
-            metrics = evaluate_engine.state.metrics
-            for metric_name, metric in metrics.items():
-                logger.info("Evalutaion metric %s: %s", metric_name, str(metric))
-            to_tensorboard = {m: metrics["rouge"][m]["f"] for m in metrics["rouge"]}
-            self.tensorboard.add_scalars("evaluating/", to_tensorboard)
+            evaluation_engine.run(eval_loader)
 
         # Sample one batch
-        @evaluate_engine.on(Events.ITERATION_COMPLETED)
+        @evaluation_engine.on(Events.ITERATION_COMPLETED)
         def sample(e: Engine):
             if e.state.iteration == 1:
                 samples, targets = e.state.output
                 articles = e.state.batch["src"]
                 articles_str, samples_str, targets_str = [
-                    self.train_dataset.decode(s) for s in [articles, samples, targets]
+                    self.datasets["train"].decode(s)
+                    for s in [articles, samples, targets]
                 ]
                 for i, d in enumerate(zip(articles_str, targets_str, samples_str)):
                     article, target, sample = d
@@ -124,183 +270,72 @@ class SummarizationTrainer:
                 raise e
 
         self.attach_progress_bar(trainer_engine, lambda x: {"loss": x})
-        trainer_engine.run(train_loader, self.training.get("epochs", 7))
+        trainer_engine.run(train_loader, self.config["training"]["epochs"])
+
+    def evaluate(self) -> Dict:
+        """Run evalution process.
+
+        Returns:
+            Dict: Evaluation metrics values.
+        """
+        if self.mode != "eval":
+            raise RuntimeError("You cannot `evaluate` in `%s` mode.", self.mode)
+
+        eval_bs = self.config["training"]["batches"]["eval_size"]
+        eval_loader = self._get_dataloader(self.datasets["test"], eval_bs)
+        evaluation_engine = self._evaluation_engine(log_tensorboard=False)
+
+        logger.info("Start model evaluation")
+        evaluation_engine.run(eval_loader)
+
+        return evaluation_engine.state.metrics
+
+    def sample(self, input: List[str]) -> List[List[str]]:
+        """Sample example.
+
+        Args:
+            input (List[str]): Input text, need to summarize.
+
+        Returns:
+            List[List[str]]: Summarizations.
+        """
+        if self.mode != "sample":
+            raise RuntimeError("You cannot `sample` in `%s` mode.", self.mode)
+
+        if isinstance(input, str):
+            input = [input]
+        dataset = self.datasets["sample"]
+        input = dataset.encode(input).to(self.device)
+        summaries, _ = self.model.inference(input, **self.config["sample"]["args"])
+        summaries_strs = dataset.decode(summaries)
+
+        return summaries_strs
+
+    def _evaluation_engine(self, log_tensorboard=False) -> Engine:
+        evaluation_args = self.config["evaluation"]["args"]
+        evaluation_engine = self.model.create_evaluator(self.device, **evaluation_args)
+
+        self.attach_metrics(evaluation_engine)
+        self.attach_progress_bar(evaluation_engine, desc="Evaluating ")
+
+        @evaluation_engine.on(Events.COMPLETED)
+        def _log_eval(e: Engine):
+            logger.info("Evaluation completed.")
+            metrics = e.state.metrics
+            for metric_name, metric in metrics.items():
+                logger.info("Evalutaion metric %s: %s", metric_name, str(metric))
+            if log_tensorboard:
+                to_tensorboard = {m: metrics["rouge"][m]["f"] for m in metrics["rouge"]}
+                self.tensorboard.add_scalars("evaluating/", to_tensorboard)
+
+        return evaluation_engine
 
     @staticmethod
-    def instantiate_datasets(dataset_config: Dict) -> Tuple[data.SummarizationDataset]:
-        """Instatiate train and test datasets.
-
-        Args:
-            dataset_config (Dict): Dataset configuration.
-
-        Returns:
-            Tuple[data.SummarizationDataset]: train and test dataset objects.
-        """
-
-        dataset_name = dataset_config["name"]
-        init_args = dataset_config["args"].get("init", {})
-        preprocess_args = dataset_config["args"].get("preprocess", {})
-        dataset_class = getattr(data, dataset_name)
-
-        # For now, we support only BPE dataset. Reuse tokenizer for both dataset parts.
-        train_dataset = dataset_class(part="train", **init_args, **preprocess_args)
-        test_dataset = dataset_class(
-            part="test", **init_args, spm=train_dataset.get_spm()
+    def _get_dataloader(dataset, batch_size):
+        loader = DataLoader(
+            dataset, batch_size, True, collate_fn=dataset.collate_function
         )
-
-        logger.info(
-            "Dataset %s with has been instantiated. Train size: %d; Test size: %d",
-            dataset_name,
-            len(train_dataset),
-            len(test_dataset),
-        )
-        return train_dataset, test_dataset
-
-    @staticmethod
-    def instantiate_model(
-        model_config: Dict, dataset
-    ) -> Tuple[models.BaseSummarizationModel, dict]:
-        """Instantiate model.
-
-        Args:
-            model_config (Dict): Model configuration.
-            dataset (SummarizationDataset): Reference dataset.
-        Notes:
-            During creating model it's necessary to know some info about used dataset.
-            For example: pretrained embeddings, data lengths and etc.
-            To serve dataset needs we pass training dataset for model create function.
-
-        Returns:
-            Tuple[models.BaseSummarizationModel, dict]: Model instance and initialization it's args.
-        """
-
-        model_name = model_config["name"]
-        init_args = model_config.get("args", {})
-        model_class = getattr(models, model_name)
-
-        model, model_args = model_class.create(dataset, init_args)
-
-        logger.info(
-            "Model %s has been instantiated. Total parameters count: %d; Initial arguments: %s",
-            model_name,
-            sum(p.numel() for p in model.learnable_parameters()),
-            str(model_args),
-        )
-        return model, model_args
-
-    @staticmethod
-    def instantiate_optimizer(
-        optim_config: Dict, learnable_parameters: Iterable
-    ) -> torch.optim.Optimizer:
-        """Instantiate optimizer
-
-        Args:
-            optim_config (Dict): Optimizer configuration.
-            learnable_parameters (Iterable): Model learnable parameters.
-
-        Returns:
-            torch.optim.Optimizer: Instantiated optimizer.
-        """
-
-        optim_name = optim_config["name"]
-        init_args = optim_config.get("args", {})
-        optim_class = getattr(torch.optim, optim_name)
-
-        logger.info(
-            "Optimizer %s has been instantiated. Initial arguments: %s",
-            optim_name,
-            init_args,
-        )
-        return optim_class(learnable_parameters, **init_args)
-
-    def load_device(self, training_config: Dict, move_model=False) -> torch.device:
-        """Load torch device.
-
-        Args:
-            training_config (Dict): Training configuration.
-            move_model (bool, optional): Defaults to False. Whether to move model to selected device.
-
-        Raises:
-            RuntimeError: Raises if system has no required device.
-
-        Returns:
-            torch.device: Selected device.
-        """
-
-        device_name = training_config.get("device", "cpu")
-        if torch.cuda.is_available():
-            if device_name == "cpu":
-                logger.warning(
-                    "You have cuda device. Change `training.device` config to use GPU acceleration."
-                )
-        else:
-            if device_name != "cpu":
-                logger.error(
-                    "You have no cuda device. Change `training.device` config to `cpu` to run your model"
-                )
-                raise RuntimeError("You have no cuda device")
-
-        device = torch.device(device_name)
-        logger.info("Selected %s device for training.", device_name)
-        if move_model:
-            self.model.to(device)
-        return device
-
-    def instantiate_dataloaders(self, training_config: Dict) -> Tuple[DataLoader]:
-        """Instantiate data loaders.
-        Args:
-            training_config (Dict): Training configuration. Needs to determine batch sizes.
-
-        Returns:
-            Tuple[torch.utils.data.DataLoader]: Train and test data loaders.
-        """
-
-        assert all(
-            [self.train_dataset is not None, self.test_dataset is not None]
-        ), "Dataloader requires instantiated dataset"
-
-        if "batches" in training_config:
-            train_batch_size = training_config["batches"].get("train_size", 16)
-            test_batch_size = training_config["batches"].get("eval_size", 32)
-        else:
-            train_batch_size = 16
-            test_batch_size = 32
-
-        train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=train_batch_size,
-            shuffle=True,
-            collate_fn=self.train_dataset.collate_function,
-        )
-
-        test_loader = DataLoader(
-            self.test_dataset,
-            batch_size=test_batch_size,
-            shuffle=True,
-            collate_fn=self.test_dataset.collate_function,
-        )
-
-        return train_loader, test_loader
-
-    @staticmethod
-    def get_intervals(training_config: Dict) -> Tuple[int]:
-        """Get interval values from config. Return default values if they are not provided.
-
-        Args:
-            training_config (Dict): Training configuration. Needs to determine intervals.
-
-        Returns:
-            Tuple[int]: Train logging interval and checkpoint interval.
-        """
-
-        if "intervals" in training_config:
-            intervals = training_config["intervals"]
-            log_interval = intervals.get("log", 100)
-            checkpoint_interval = intervals.get("checkpoint", 1000)
-        else:
-            log_interval = 100
-            checkpoint_interval = 1000
-        return log_interval, checkpoint_interval
+        return loader
 
     @staticmethod
     def attach_progress_bar(
@@ -336,8 +371,8 @@ class SummarizationTrainer:
 
         def _rouge_process_function(output):
             generated, target = output
-            generated_str = self.train_dataset.decode(generated)
-            target_str = self.train_dataset.decode(target)
+            generated_str = self.datasets["test"].decode(generated)
+            target_str = self.datasets["test"].decode(target)
             return generated_str, target_str
 
         metrics = {"rouge": RougeMetric(_rouge_process_function)}
@@ -346,17 +381,13 @@ class SummarizationTrainer:
             metric.attach(e, metric_name)
 
 
-def load_trainer(config: Dict):
-    """Load trainer with required config.
+def validate_config(config: Dict):
+    """Validate config with JSON schema.
 
     Args:
-        config (Dict): Model training configuration.
-
-    Returns:
-        object: Trainer object, inherited from :class:`BaseTrainer`.
+        config (Dict): Configuration dictionary.
     """
 
-    # Validate config with JSON schema
     with open(MODELRUN_SCHEMA) as schema_file:
         schema = json.load(schema_file)
         try:
@@ -365,5 +396,18 @@ def load_trainer(config: Dict):
             logger.error(e.message)
             raise
 
-    trainer_class = globals()[config["training"]["name"]]
-    return trainer_class(config=config)
+
+def load_pipeline(config: Dict, mode="train", **kwargs):
+    """Load pipeline with required config.
+
+    Args:
+        config (Dict): Pipeline configuration.
+
+    Returns:
+        object: Pipeline object.
+    """
+
+    validate_config(config)
+
+    pipeline_class = globals()[config["training"]["name"]]
+    return pipeline_class(config=config, mode=mode, **kwargs)

@@ -1,1 +1,1 @@
-from .train import load_trainer
+from .train import (load_pipeline, SummarizationPipeline)

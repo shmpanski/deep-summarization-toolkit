@@ -8,7 +8,7 @@ from jsonschema import ValidationError
 from dst import train
 
 
-class TestSummarizationTrainer(unittest.TestCase):
+class TestSummarizationPipeline(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.dirname = self.directory.name
@@ -54,71 +54,17 @@ class TestSummarizationTrainer(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def test_load_trainer(self):
-        trainer = train.load_trainer(self.config)
-        self.assertDictEqual(self.config, trainer.config)
+    def test_train_mode_init(self):
+        pipeline = train.SummarizationPipeline(self.config)
+        self.assertEqual(pipeline.config["training"]["batches"]["train_size"], 16)
+        self.assertEqual(len(pipeline.datasets), 2)
+        self.assertEqual(len(pipeline.datasets["train"]), 3)
+        self.assertEqual(len(pipeline.datasets["test"]), 3)
+        self.assertIsNotNone(pipeline.model)
+        self.assertIsNotNone(pipeline.optimizer)
 
-    def test_load_trainer_validation(self):
-        invalid_conf = {"prefix": "pref", "model": {"name": 42}}
-        with self.assertRaises(ValidationError):
-            train.load_trainer(invalid_conf)
+    def test_train(self):
+        pipeline = train.SummarizationPipeline(self.config)
+        pipeline.train()
 
-    def test_instantiate_dataset(self):
-        train_dataset, test_dataset = train.SummarizationTrainer.instantiate_datasets(
-            self.config["dataset"]
-        )
-        self.assertEqual(len(train_dataset), 3)
-        self.assertEqual(len(test_dataset), 3)
 
-    def test_instantiate_model(self):
-        train_dataset, _ = train.SummarizationTrainer.instantiate_datasets(
-            self.config["dataset"]
-        )
-        model, args = train.SummarizationTrainer.instantiate_model(
-            self.config["model"], train_dataset
-        )
-        self.assertTrue(hasattr(model, "forward"))
-        self.assertIsInstance(args, dict)
-
-    def test_instantiate_optimizer(self):
-        train_dataset, _ = train.SummarizationTrainer.instantiate_datasets(
-            self.config["dataset"]
-        )
-        model, args = train.SummarizationTrainer.instantiate_model(
-            self.config["model"], train_dataset
-        )
-        optim = train.SummarizationTrainer.instantiate_optimizer(
-            self.config["optimizer"], model.learnable_parameters()
-        )
-        self.assertTrue(hasattr(optim, "step"))
-
-    def test_load_device(self):
-        trainer = train.SummarizationTrainer(self.config)
-        device = trainer.load_device({}, move_model=True)
-        self.assertIsInstance(device, torch.device)
-
-    def test_instantiate_dataloader(self):
-        trainer = train.SummarizationTrainer(self.config)
-        training_config = {"batches": {"train_size": 8, "eval_size": 16}}
-        train_loader, test_loader = trainer.instantiate_dataloaders(training_config)
-        self.assertEqual(train_loader.batch_size, 8)
-        self.assertEqual(test_loader.batch_size, 16)
-
-        train_loader, test_loader = trainer.instantiate_dataloaders({})
-        self.assertEqual(train_loader.batch_size, 16)
-        self.assertEqual(test_loader.batch_size, 32)
-
-    def test_get_intervals(self):
-        trainer = train.SummarizationTrainer(self.config)
-        training_config = {"intervals": {"checkpoint": 100, "log": 10}}
-        log_interval, checkpoint_interval = trainer.get_intervals(training_config)
-        self.assertEqual(log_interval, 10)
-        self.assertEqual(checkpoint_interval, 100)
-
-        log_interval, checkpoint_interval = trainer.get_intervals({})
-        self.assertEqual(log_interval, 100)
-        self.assertEqual(checkpoint_interval, 1000)
-
-    def test_run(self):
-        trainer = train.SummarizationTrainer(self.config)
-        trainer.run()
