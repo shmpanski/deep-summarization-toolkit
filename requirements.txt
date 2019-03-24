@@ -9,3 +9,4 @@ PyYAML
 rouge
 nltk
 selectolax
+jsonschema
