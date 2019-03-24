@@ -85,7 +85,7 @@ class SummarizationRNN(BaseSummarizationModel):
         output_vocab_distr = self.out_to_vocab(decoder_output)
         return output_vocab_distr[:, :-1, :].contiguous(), attention_distr
 
-    def inference(self, source, limit, source_lengths=None, beam_size=5):
+    def inference(self, source, limit=15, source_lengths=None, beam_size=5):
         """Inference sequences using model.
 
         Args:

@@ -1,41 +1,82 @@
-model: SummarizationTransformer
+$schema: ../dst/schemas/modelrun.schema.json
+# Model prefix, describes name folder with model dumps and logs
+prefix: ria-20-t
+dataset:
+  # Class name of used dataset stored in dst.data
+  name: RIADataset
+  # See class documentations for more details.
+  args:
+    # Initialization args, need for dataset instantiation.
+    init:
+      # Directory with raw dataset files, such as {train, test, dev}.tsv parts.
+      directory: ./datasets/ria-20
+      # Dataset prefix. All preprocessed data should stored with this prefix.
+      prefix: ria-300-sg
+      # Specific for RIA dataset.
+      # Number of sentences from original news.
+      n_sentences: 3
+      # Specific for RIA dataset.
+      # Whether to remove html tags from news.
+      rm_strongs: True
+      # Specific for RIA dataset.
+      # The distribution of dataset part sizes.
+      # -1 means remaining.
+      parts:
+        train: -1
+        test: 20000
+        dev: 5000
+    preprocess:
+      # Whether to pretrain word2vec embeddings.
+      pretrain_emb: True
+      # Vocabulary size.
+      vocab_size: 30000
+      # Embedding size.
+      embedding_size: 300
+      # Specific fro sentencepiece. Maximum text length on one line.
+      max_sentence_length: 16384
+      # Number of cpu workers.
+      workers: 3
+      # Whether to use skip-gram word2vec approach.
+      skip_gramm: True
 
-margs: {}
+model:
+  # Class name of used model stored int dst.models
+  name: SummarizationTransformer
+  # See class documentation for more details.
+  # Use defalt arguments.
+  args: {}
 
-dataset: RIADataset
-dargs:
-  init:
-    directory: ./datasets/ria-20
-    prefix: ria-300-sg
-    max_sequence_length: 150
-    parts:
-      train: -1
-      test: 20000
-      dev: 5000
-    n_sentences: 3
-    rm_strongs: True
-  preprocess:
-    pretrain_emb: True
-    vocab_size: 30000
-    embedding_size: 300
-    # Max sequence length for sentecepiece processor
-    max_sentence_length: 16384
-    workers: 3
-    # Whether to use skip-gram for training word2vec
-    skip_gramm: True
+optimizer:
+  # Class name of used optimizer stored in torch.optim
+  name: Adam
+  # You may pass `args` to use default arguments.
+  args:
+    lr: 1.0e-4
+    amsgrad: True
+    betas: [0.9, 0.98]
+    eps: 1.0e-9
 
-optimizer: Adam
-oargs:
-  lr: 1.0e-4
-  amsgrad: True
-  betas: [0.9, 0.98]
-  eps: 1.0e-9
-
-targs:
-  prefix: ria-20-t
-  device: cuda
+training:
+  # Class name of used pipeline stored in dst.train.
+  name: SummarizationPipeline
   epochs: 10
-  train_batch_size: 16
-  test_batch_size: 16
-  checkpoint_interval: 1000
-  train_log_interval: 100
+  device: cuda
+  # Checkpoint and logging intervals.
+  intervals:
+    checkpoint: 1000
+    log: 1000
+  # Batch sizing.
+  batches:
+    train_size: 16
+    eval_size: 16
+
+evaluation:
+  # Describe evaluation args, pass this config to use default arguments.
+  args:
+    beam_size: 1
+
+sample:
+  # Describe sampling args, pass this config to use default arguments.
+  args:
+    limit: 15
+    beam_size: 3

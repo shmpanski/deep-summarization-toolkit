@@ -7,3 +7,6 @@ pytorch-ignite
 tensorboardX
 PyYAML
 rouge
+nltk
+selectolax
+jsonschema

@@ -203,7 +203,7 @@ class BPEDataset(SummarizationDataset):
         return self.spm
 
     def encode(self, sequences):
-        sequences = [self.spm.EncodeAsIds(s) for s in sequences]
+        sequences = [self.spm.EncodeAsIds(s)[:self.max_sequence_length] for s in sequences]
         return torch.LongTensor(sequences)
 
     def decode(self, sequences):
