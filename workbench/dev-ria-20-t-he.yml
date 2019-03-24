@@ -1,6 +1,6 @@
 $schema: ../dst/schemas/modelrun.schema.json
 # Model prefix, describes name folder with model dumps and logs
-prefix: ria-20-rnn
+prefix: dev-ria-20-t-he
 dataset:
   # Class name of used dataset stored in dst.data
   name: RIADataset
@@ -11,7 +11,9 @@ dataset:
       # Directory with raw dataset files, such as {train, test, dev}.tsv parts.
       directory: ./datasets/ria-20
       # Dataset prefix. All preprocessed data should stored with this prefix.
-      prefix: ria-300-sg
+      prefix: ria-100-cbow
+      # Whether to use dev part of dataset as train part.
+      dev: True
       # Specific for RIA dataset.
       # Number of sentences from original news.
       n_sentences: 3
@@ -29,46 +31,47 @@ dataset:
       # Whether to pretrain word2vec embeddings.
       pretrain_emb: True
       # Vocabulary size.
-      vocab_size: 30000
+      vocab_size: 10000
       # Embedding size.
-      embedding_size: 300
+      embedding_size: 100
       # Specific fro sentencepiece. Maximum text length on one line.
       max_sentence_length: 16384
       # Number of cpu workers.
       workers: 3
       # Whether to use skip-gram word2vec approach.
-      skip_gramm: True
+      skip_gramm: False
 
 model:
   # Class name of used model stored int dst.models
-  name: SummarizationRNN
+  name: PBATransformer
   # See class documentation for more details.
-  # Use default arguments.
-  args: {}
+  args:
+    num_layers: 1
+    emb_size: 100
+    dim_m: 64
+    n_heads: 4
+    dim_i: 64
+    head_convs: [1, 2]
+    attention: heterogeneous
 
 optimizer:
   # Class name of used optimizer stored in torch.optim
   name: Adam
   # You may pass `args` to use default arguments.
-  args:
-    lr: 1.0e-4
-    amsgrad: True
-    betas: [0.9, 0.98]
-    eps: 1.0e-9
 
 training:
   # Class name of used pipeline stored in dst.train.
   name: SummarizationPipeline
-  epochs: 10
-  device: cuda
+  epochs: 3
+  device: cpu
   # Checkpoint and logging intervals.
   intervals:
-    checkpoint: 1000
-    log: 1000
+    checkpoint: 100
+    log: 100
   # Batch sizing.
   batches:
     train_size: 16
-    eval_size: 16
+    eval_size: 32
 
 evaluation:
   # Describe evaluation args, pass this config to use default arguments.
@@ -79,4 +82,4 @@ sample:
   # Describe sampling args, pass this config to use default arguments.
   args:
     limit: 15
-    beam_size: 3
+    beam_size: 1
