@@ -43,7 +43,7 @@ class BPEDataset(SummarizationDataset):
             logger.info("Dataset part {}/{} not founded".format(self.data_workdir, part))
             self.preprocess(directory, prefix, part, **kwargs)
 
-        self.data = np.load(self.part_file)
+        self.data = np.load(self.part_file, allow_pickle=True)
 
         if "spm" in kwargs:
             logger.info("Use existing spm model")

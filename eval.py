@@ -26,6 +26,6 @@ if __name__ == "__main__":
     model_state = args.model_state[0]
     with open(config_filename, "r") as config_file:
         logger.info("Loaded configurations from %s", config_file.name)
-        config = yaml.load(config_file)
+        config = yaml.load(config_file, Loader=yaml.SafeLoader)
         evaluator = train.load_pipeline(config, "eval", dump_file=model_state)
         evaluator.evaluate()

@@ -20,6 +20,6 @@ if __name__ == "__main__":
     config_filename = args.config_file[0]
     with open(config_filename, "r") as config_file:
         logging.info("Loaded configurations from %s", config_file.name)
-        config = yaml.load(config_file)
+        config = yaml.load(config_file, Loader=yaml.SafeLoader)
         trainer = train.load_pipeline(config, "train")
         trainer.train()

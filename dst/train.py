@@ -244,6 +244,8 @@ class SummarizationPipeline:
         def evaluate(e: Engine):
             logger.info("Start model evaluation.")
 
+            # Sory for this meta; Ignite initialize state after run call.
+            evaluation_engine.last_epoch = e.state.epoch
             evaluation_engine.run(eval_loader)
 
         # Sample one batch
@@ -326,7 +328,8 @@ class SummarizationPipeline:
                 logger.info("Evalutaion metric %s: %s", metric_name, str(metric))
             if log_tensorboard:
                 to_tensorboard = {m: metrics["rouge"][m]["f"] for m in metrics["rouge"]}
-                self.tensorboard.add_scalars("evaluating/", to_tensorboard)
+                log_step = e.last_epoch if hasattr(e, "last_epoch") else 0
+                self.tensorboard.add_scalars("evaluating/", to_tensorboard, log_step)
 
         return evaluation_engine
 

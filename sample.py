@@ -30,7 +30,7 @@ if __name__ == "__main__":
     output_filename = args.output[0]
     with open(config_filename, "r") as config_file:
         logger.info("Loaded sampling configurations from %s", config_file.name)
-        config = yaml.load(config_file)
+        config = yaml.load(config_file, Loader=yaml.SafeLoader)
         sampler = train.load_pipeline(config, "sample", dump_file=model_state)
 
     with open(input_filename, "r") as input_file, open(
