@@ -237,7 +237,7 @@ class SummarizationPipeline:
                 pattern = "Epoch[{}] | Iteration [{}/{}] | Loss: {:.4f}"
                 message = pattern.format(epoch, iteration, len(train_loader), loss)
                 logger.info(message)
-                self.tensorboard.add_scalar("training/loss", loss, iteration)
+                self.tensorboard.add_scalar("training/loss", loss, e.state.iteration)
 
         # Evaluate model.
         @trainer_engine.on(Events.EPOCH_COMPLETED)
