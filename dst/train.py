@@ -325,7 +325,7 @@ class SummarizationPipeline:
             logger.info("Evaluation completed.")
             metrics = e.state.metrics
             for metric_name, metric in metrics.items():
-                logger.info("Evalutaion metric %s: %s", metric_name, str(metric))
+                logger.info("Evaluation metric %s: %s", metric_name, str(metric))
             if log_tensorboard:
                 to_tensorboard = {m: metrics["rouge"][m]["f"] for m in metrics["rouge"]}
                 log_step = e.last_epoch if hasattr(e, "last_epoch") else 0
