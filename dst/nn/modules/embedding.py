@@ -9,7 +9,8 @@ class PositionalEmbedding(nn.Module):
                  dim_m,
                  vocab_size,
                  emb_size=None,
-                 embeddings=None):
+                 embeddings=None,
+                 **kwargs):
         """Embeddings with positional encoding.
 
         Args:
@@ -20,6 +21,7 @@ class PositionalEmbedding(nn.Module):
               embedding weights.
             embeddings (torch.Tensor, optional): Tensor `(vocab_size, emb_size)` of embeddings weights. Embedding size
               value would inherited from shape of this tensor.
+            **kwargs: :class:`torch.nn.Embedding` arguments.
 
         Inputs:
             - **input**: Long tensor of shape `(batch, seq_len)` - input sequence.
@@ -38,12 +40,10 @@ class PositionalEmbedding(nn.Module):
         self.positional = nn.Embedding(max_seq_len + 1, dim_m, padding_idx=0)
 
         if embeddings is None:
-            self.embedding = nn.Embedding(vocab_size, emb_size)
+            self.embedding = nn.Embedding(vocab_size, emb_size, **kwargs)
         else:
             emb_size = embeddings.shape[1]
-            self.embedding = nn.Embedding(*embeddings.shape)
-            self.embedding.weight = nn.Parameter(
-                embeddings, requires_grad=False)
+            self.embedding = nn.Embedding.from_pretrained(embeddings, **kwargs)
 
         self.alignment = nn.Linear(emb_size, dim_m, bias=False)
 
