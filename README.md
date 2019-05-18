@@ -26,7 +26,7 @@ See [workbench](./workbench) readme for more details and datasets and models ove
 ### Requirements
 
 - python >= 3.5
-- pytorch >= 0.4.0
+- pytorch >= 1.1.0
 - gensim
 
 Other dependencies can be found in file [requirements.txt](./requirements.txt).
@@ -71,11 +71,6 @@ You can find some examples in [workbench](/workbench) directory.
 
 ## TODOs
 
-- Add docker
-- Publish repo
-  - Setup CI
-  - Coverage
-  - Testing
 - Add more models
 - Improve beam search perfomance
 - Improve transformer perfomance
