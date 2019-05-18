@@ -12,4 +12,5 @@ from .modules import (Transformer,
                       PositionalEmbedding,
                       PositionWise,
                       RNNEncoder,
-                      RNNDecoder)
+                      RNNDecoder,
+                      NLLvMF)

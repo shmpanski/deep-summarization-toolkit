@@ -13,3 +13,4 @@ from .transformer import (TransformerDecoderLayer,
                           PBATransformerEncoderLayer,
                           PBATransformerDecoderLayer)
 from .rnn import RNNEncoder, RNNDecoder
+from .loss import NLLvMF
